@@ -112,7 +112,7 @@ app.post("/login", (req, res) => {
           return res.json({ Error: "Password compare error" });
         }
         if(response){
-          const name = data[0].email;
+          const name = data[0].first_name;
           const token = jwt.sign({ name }, process.env.JWT_SECRET, {expiresIn: "7d"});
           res.cookie('token', token);
           return res.json({ status: "Success"});
@@ -126,6 +126,41 @@ app.post("/login", (req, res) => {
       return res.json({ Error: "Email not found, Please Register!" });
     }
   })
+})
+
+app.get("/profile", verifyUser, (req, res) => {
+  const sql = "SELECT * FROM user_tbl WHERE first_name = ?";
+  db.query(sql, [req.name], (err, data) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res.json({ Error: "Error fetching user profile data" });
+    }
+    if (data.length > 0) {
+      // Exclude sensitive data like password from the response
+      const userProfile = {
+        user_type: data[0].user_type,
+        first_name: data[0].first_name,
+        last_name: data[0].last_name,
+        email: data[0].email,
+        phone_number: data[0].phone_number,
+        company_name: data[0].company_name,
+        company_address: data[0].company_address,
+        address_city: data[0].address_city,
+        address_state: data[0].address_state,
+        address_country: data[0].address_country,
+        pincode: data[0].pincode,
+        GST_no: data[0].GST_no,
+      };
+      return res.json({ status: "Success", data: userProfile });
+    } else {
+      return res.json({ Error: "User not found!" });
+    }
+  });
+});
+
+app.get('/logout', (req, res) => {
+  res.clearCookie('token');
+  return res.json({ status: "Success" });
 })
 
 app.listen(PORT, () => {
