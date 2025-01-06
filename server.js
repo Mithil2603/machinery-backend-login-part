@@ -6,6 +6,7 @@ import mysql from 'mysql2';
 import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
 
 const salt = 10;
 const app = express();
@@ -14,7 +15,11 @@ const PORT = process.env.PORT;
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:3001", "http://localhost:3000"],
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 app.use(cookieParser());
 
 const db = mysql.createConnection({
@@ -85,6 +90,9 @@ app.post("/login", (req, res) => {
           return res.json({ Error: "Password compare error" });
         }
         if(response){
+          const name = data[0].email;
+          const token = jwt.sign({ name }, process.env.JWT_SECRET, {expiresIn: "7d"});
+          res.cookie('token', token);
           return res.json({ status: "Success"});
         }
         else {
