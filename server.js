@@ -6,7 +6,7 @@ import mysql from 'mysql2';
 import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
-import jwt from "jsonwebtoken";
+import jwt, { decode } from "jsonwebtoken";
 
 const salt = 10;
 const app = express();
@@ -37,6 +37,28 @@ db.connect((err) => {
     console.log('Connected to the MySQL database.');
   }
 });
+
+const verifyUser = (req, res, next) => {
+  const token = req.cookies.token;
+  if(!token) {
+    return res.json({ Error: "You are not authenticated" })
+  }
+  else {
+    jwt.verify(token, process.env.JWT_SECRET, (err, decode) => {
+      if(err) {
+        return res.json({ Error: "Token is not correct" });
+      }
+      else {
+        req.name = decode.name;
+        next();
+      }
+    });
+  }
+}
+
+app.get('/', verifyUser ,(req, res) => {
+  return res.json({ status: "Success", name: req.name});
+})
 
 app.post("/register", (req, res) => {
   const sql =
