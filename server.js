@@ -123,7 +123,7 @@ app.post("/login", (req, res) => {
       })
     }
     else {
-      return res.json({ Error: "Email not found, Please Register!" });
+      return res.json({ message: "Email not found, Please Register!" });
     }
   })
 })
