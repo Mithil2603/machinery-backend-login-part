@@ -41,12 +41,12 @@ db.connect((err) => {
 const verifyUser = (req, res, next) => {
   const token = req.cookies.token;
   if(!token) {
-    return res.json({ Error: "You are not authenticated" })
+    return res.status(401).json({ Error: "You are not authenticated" })
   }
   else {
     jwt.verify(token, process.env.JWT_SECRET, (err, decode) => {
       if(err) {
-        return res.json({ Error: "Token is not correct" });
+        return res.status(403).json({ Error: "Token is not correct" });
       }
       else {
         req.name = decode.name;
@@ -158,7 +158,9 @@ app.get("/profile", verifyUser, (req, res) => {
   });
 });
 
-app.get('/logout', (req, res) => {
+
+
+app.get('/logout', verifyUser, (req, res) => {
   res.clearCookie('token');
   return res.json({ status: "Success" });
 })
