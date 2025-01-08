@@ -17,7 +17,7 @@ app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({
   origin: ["http://localhost:3001", "http://localhost:3000"],
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
 app.use(cookieParser());
@@ -158,11 +158,38 @@ app.get("/profile", verifyUser, (req, res) => {
   });
 });
 
+app.put("/updateProfile", verifyUser, (req, res) => {
+  const { first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no } = req.body;
 
+  const sql = `
+    UPDATE user_tbl 
+    SET 
+      first_name = ?, 
+      last_name = ?, 
+      phone_number = ?, 
+      company_name = ?, 
+      company_address = ?, 
+      address_city = ?, 
+      address_state = ?, 
+      address_country = ?, 
+      pincode = ?, 
+      GST_no = ?
+    WHERE 
+      first_name = ?
+  `;
+
+  db.query(sql, [first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, req.name], (err, result) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res.json({ Error: "Error updating user profile data" });
+    }
+    return res.json({ status: "Success", message: "Profile updated successfully!" });
+  });
+});
 
 app.get('/logout', verifyUser, (req, res) => {
   res.clearCookie('token');
-  return res.json({ status: "Success" });
+  return res.status(200).json({ status: "Success" });
 })
 
 app.listen(PORT, () => {
