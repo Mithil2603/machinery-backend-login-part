@@ -22,19 +22,24 @@ app.use(cors({
 }));
 app.use(cookieParser());
 
-const db = mysql.createConnection({
+// Create a connection pool
+const pool = mysql.createPool({
   host: process.env.HOST,
   user: process.env.USER,
   password: process.env.PASSWORD,
   database: process.env.DATABASE,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 });
 
 // Connect to the database
-db.connect((err) => {
+pool.getConnection((err, connection) => {
   if (err) {
-    console.error('Database connection failed:', err.message);
+    console.error("Database connection failed:", err.message);
   } else {
-    console.log('Connected to the MySQL database.');
+    console.log("Connected to the MySQL database.");
+    connection.release(); // Release the connection back to the pool
   }
 });
 
@@ -49,12 +54,18 @@ const verifyUser = (req, res, next) => {
         return res.status(403).json({ Error: "Token is not correct" });
       }
       else {
+        console.log("Decoded token:", decode);
         req.name = decode.name;
+        req.user_id = decode.user_id;
         next();
       }
     });
   }
 }
+
+app.get("/auth/status", verifyUser, (req, res) => {
+  res.status(200).json({ status: "Authenticated", name: req.name });
+});
 
 app.get('/', verifyUser ,(req, res) => {
   return res.json({ status: "Success", name: req.name});
@@ -86,7 +97,7 @@ app.post("/register", (req, res) => {
       hash,
     ];
 
-    db.query(sql, values, (err, result) => {
+    pool.query(sql, values, (err, result) => {
       if (err) {
         if(err.code === 'ER_DUP_ENTRY') {
           res.status(409).json({ status: "Error", message: "Email already Exists" });
@@ -102,7 +113,7 @@ app.post("/register", (req, res) => {
 
 app.post("/login", (req, res) => {
   const sql = "SELECT * FROM user_tbl WHERE email = ?";
-  db.query(sql, [req.body.email], (err, data) => {
+  pool.query(sql, [req.body.email], (err, data) => {
     if(err) {
       return res.json({ Error: "Error Login in server!" });
     }
@@ -113,7 +124,8 @@ app.post("/login", (req, res) => {
         }
         if(response){
           const name = data[0].first_name;
-          const token = jwt.sign({ name }, process.env.JWT_SECRET, {expiresIn: "7d"});
+          const user_id = data[0].user_id;
+          const token = jwt.sign({ name, user_id }, process.env.JWT_SECRET, {expiresIn: "7d"});
           res.cookie('token', token);
           return res.json({ status: "Success"});
         }
@@ -130,7 +142,7 @@ app.post("/login", (req, res) => {
 
 app.get("/profile", verifyUser, (req, res) => {
   const sql = "SELECT * FROM user_tbl WHERE first_name = ?";
-  db.query(sql, [req.name], (err, data) => {
+  pool.query(sql, [req.name], (err, data) => {
     if (err) {
       console.error("SQL Error:", err);
       return res.json({ Error: "Error fetching user profile data" });
@@ -178,7 +190,7 @@ app.put("/updateProfile", verifyUser, (req, res) => {
       first_name = ?
   `;
 
-  db.query(sql, [first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, req.name], (err, result) => {
+  pool.query(sql, [first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, req.name], (err, result) => {
     if (err) {
       console.error("SQL Error:", err);
       return res.json({ Error: "Error updating user profile data" });
@@ -191,6 +203,105 @@ app.get('/logout', verifyUser, (req, res) => {
   res.clearCookie('token');
   return res.status(200).json({ status: "Success" });
 })
+
+// Utility function to wrap `mysql2` callbacks in Promises
+const query = (sql, params) =>
+  new Promise((resolve, reject) => {
+    pool.query(sql, params, (error, results) => {
+      if (error) return reject(error);
+      resolve(results);
+    });
+  });
+
+const beginTransaction = () =>
+  new Promise((resolve, reject) => {
+    pool.getConnection((err, connection) => {
+      if (err) return reject(err);
+      connection.beginTransaction((error) => {
+        if (error) return reject(error);
+        resolve(connection);
+      });
+    });
+  });
+
+const commitTransaction = (connection) =>
+  new Promise((resolve, reject) => {
+    connection.commit((error) => {
+      if (error) return reject(error);
+      connection.release();
+      resolve();
+    });
+  });
+
+const rollbackTransaction = (connection) =>
+  new Promise((resolve, reject) => {
+    connection.rollback(() => {
+      connection.release();
+      resolve();
+    });
+  });
+
+app.post("/place-order", verifyUser, async (req, res) => {
+  const {
+    product_id,
+    quantity,
+    no_of_ends,
+    creel_type,
+    creel_pitch,
+    bobin_length,
+  } = req.body;
+
+  let connection;
+
+  console.log("Request body:", req.body);
+
+  try {
+    // Start transaction
+    connection = await beginTransaction();
+
+    // Insert into `order_tbl`
+    const orderResult = await query(
+      "INSERT INTO order_tbl (user_id, order_status) VALUES (?, ?)",
+      [req.user_id, "Pending"]
+    );
+    // console.log("User ID:", req.user_id); // Log the value of user_id
+    const orderId = orderResult.insertId;
+
+    // Insert into `order_details_tbl`
+    await query(
+      `
+      INSERT INTO order_details_tbl 
+      (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+      [orderId, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length]
+    );
+
+    // Commit transaction
+    await commitTransaction(connection);
+
+    // Generate WhatsApp notification URL
+    const ownerNumber = "917041177240"; // Replace with owner's WhatsApp number
+    const message = encodeURIComponent(`
+      New Order Placed!
+      Order ID: ${orderId}
+      Product ID: ${product_id}
+      Quantity: ${quantity}
+      Specifications:
+      - No. of Ends: ${no_of_ends}
+      - Creel Type: ${creel_type}
+      - Creel Pitch: ${creel_pitch}
+      - Bobin Length: ${bobin_length}
+    `);
+    const whatsappURL = `https://wa.me/${ownerNumber}?text=${message}`;
+
+    res.status(200).json({ orderId, whatsappURL });
+  } catch (err) {
+    if (connection) await rollbackTransaction(connection);
+    console.error("Error placing order:", err);
+    res.status(500).json({ error: "Failed to place order" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server Started at ${PORT}`);
