@@ -1,8 +1,8 @@
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
-import bodyParser from 'body-parser';
-import mysql from 'mysql2';
+import bodyParser from "body-parser";
+import mysql from "mysql2";
 import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
@@ -15,11 +15,13 @@ const PORT = process.env.PORT;
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors({
-  origin: ["http://localhost:3001", "http://localhost:3000"],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: ["http://localhost:3001", "http://localhost:3000"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 app.use(cookieParser());
 
 // Create a connection pool
@@ -45,31 +47,28 @@ pool.getConnection((err, connection) => {
 
 const verifyUser = (req, res, next) => {
   const token = req.cookies.token;
-  if(!token) {
-    return res.status(401).json({ Error: "You are not authenticated" })
-  }
-  else {
+  if (!token) {
+    return res.status(401).json({ Error: "You are not authenticated" });
+  } else {
     jwt.verify(token, process.env.JWT_SECRET, (err, decode) => {
-      if(err) {
+      if (err) {
         return res.status(403).json({ Error: "Token is not correct" });
-      }
-      else {
-        console.log("Decoded token:", decode);
+      } else {
         req.name = decode.name;
         req.user_id = decode.user_id;
         next();
       }
     });
   }
-}
+};
 
 app.get("/auth/status", verifyUser, (req, res) => {
   res.status(200).json({ status: "Authenticated", name: req.name });
 });
 
-app.get('/', verifyUser ,(req, res) => {
-  return res.json({ status: "Success", name: req.name});
-})
+app.get("/", verifyUser, (req, res) => {
+  return res.json({ status: "Success", name: req.name });
+});
 
 app.post("/register", (req, res) => {
   const sql =
@@ -99,8 +98,10 @@ app.post("/register", (req, res) => {
 
     pool.query(sql, values, (err, result) => {
       if (err) {
-        if(err.code === 'ER_DUP_ENTRY') {
-          res.status(409).json({ status: "Error", message: "Email already Exists" });
+        if (err.code === "ER_DUP_ENTRY") {
+          res
+            .status(409)
+            .json({ status: "Error", message: "Email already Exists" });
         }
         console.error("SQL Error:", err);
         return res.json({ Error: "Error inserting data in server" });
@@ -114,31 +115,35 @@ app.post("/register", (req, res) => {
 app.post("/login", (req, res) => {
   const sql = "SELECT * FROM user_tbl WHERE email = ?";
   pool.query(sql, [req.body.email], (err, data) => {
-    if(err) {
+    if (err) {
       return res.json({ Error: "Error Login in server!" });
     }
-    if(data.length > 0) {
-      bcrypt.compare(req.body.user_password.toString(), data[0].user_password, (err, response) => {
-        if(err) {
-          return res.json({ Error: "Password compare error" });
+    if (data.length > 0) {
+      bcrypt.compare(
+        req.body.user_password.toString(),
+        data[0].user_password,
+        (err, response) => {
+          if (err) {
+            return res.json({ Error: "Password compare error" });
+          }
+          if (response) {
+            const name = data[0].first_name;
+            const user_id = data[0].user_id;
+            const token = jwt.sign({ name, user_id }, process.env.JWT_SECRET, {
+              expiresIn: "7d",
+            });
+            res.cookie("token", token);
+            return res.json({ status: "Success" });
+          } else {
+            return res.json({ message: "Password does not match!" });
+          }
         }
-        if(response){
-          const name = data[0].first_name;
-          const user_id = data[0].user_id;
-          const token = jwt.sign({ name, user_id }, process.env.JWT_SECRET, {expiresIn: "7d"});
-          res.cookie('token', token);
-          return res.json({ status: "Success"});
-        }
-        else {
-          return res.json({ message: "Password does not match!"});
-        }
-      })
-    }
-    else {
+      );
+    } else {
       return res.json({ message: "Email not found, Please Register!" });
     }
-  })
-})
+  });
+});
 
 app.get("/profile", verifyUser, (req, res) => {
   const sql = "SELECT * FROM user_tbl WHERE first_name = ?";
@@ -171,7 +176,18 @@ app.get("/profile", verifyUser, (req, res) => {
 });
 
 app.put("/updateProfile", verifyUser, (req, res) => {
-  const { first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no } = req.body;
+  const {
+    first_name,
+    last_name,
+    phone_number,
+    company_name,
+    company_address,
+    address_city,
+    address_state,
+    address_country,
+    pincode,
+    GST_no,
+  } = req.body;
 
   const sql = `
     UPDATE user_tbl 
@@ -190,19 +206,150 @@ app.put("/updateProfile", verifyUser, (req, res) => {
       first_name = ?
   `;
 
-  pool.query(sql, [first_name, last_name, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, req.name], (err, result) => {
-    if (err) {
-      console.error("SQL Error:", err);
-      return res.json({ Error: "Error updating user profile data" });
+  pool.query(
+    sql,
+    [
+      first_name,
+      last_name,
+      phone_number,
+      company_name,
+      company_address,
+      address_city,
+      address_state,
+      address_country,
+      pincode,
+      GST_no,
+      req.name,
+    ],
+    (err, result) => {
+      if (err) {
+        console.error("SQL Error:", err);
+        return res.json({ Error: "Error updating user profile data" });
+      }
+      return res.json({
+        status: "Success",
+        message: "Profile updated successfully!",
+      });
     }
-    return res.json({ status: "Success", message: "Profile updated successfully!" });
+  );
+});
+
+app.get("/logout", verifyUser, (req, res) => {
+  res.clearCookie("token");
+  return res.status(200).json({ status: "Success" });
+});
+
+// Retrieve all categories (Public Access)
+app.get("/categories", (req, res) => {
+  const sql = "SELECT * FROM category_tbl";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
   });
 });
 
-app.get('/logout', verifyUser, (req, res) => {
-  res.clearCookie('token');
-  return res.status(200).json({ status: "Success" });
-})
+// Add a new category (Admin Access Only)
+app.post("/categories", verifyUser, async (req, res) => {
+  // You can add additional admin verification logic here
+  const { category_name, category_description, category_img } = req.body;
+  const sql =
+    "INSERT INTO category_tbl (category_name, category_description, category_img) VALUES (?, ?, ?)";
+  pool.query(
+    sql,
+    [category_name, category_description, JSON.stringify(category_img)],
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({
+        message: "Category added successfully",
+        categoryId: result.insertId,
+      });
+    }
+  );
+});
+
+// Retrieve all products (Public Access)
+app.get("/products", (req, res) => {
+  const sql = "SELECT * FROM product_tbl";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
+});
+
+// Retrieve a specific product by productId (Public Access)
+app.get("/products/:productId", (req, res) => {
+  const { productId } = req.params;
+  const sql = "SELECT * FROM product_tbl WHERE product_id = ?";
+  pool.query(sql, [productId], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (result.length === 0)
+      return res.status(404).json({ error: "Product not found" });
+    res.status(200).json(result[0]);
+  });
+});
+
+// Add a new product (Admin Access Only)
+app.post("/products", verifyUser, async (req, res) => {
+  const { category_id, product_name, product_description, product_img } =
+    req.body;
+  const sql =
+    "INSERT INTO product_tbl (category_id, product_name, product_description, product_img) VALUES (?, ?, ?, ?)";
+  pool.query(
+    sql,
+    [
+      category_id,
+      product_name,
+      JSON.stringify(product_description),
+      JSON.stringify(product_img),
+    ],
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({
+        message: "Product added successfully",
+        productId: result.insertId,
+      });
+    }
+  );
+});
+
+// Add feedback for a product (Authenticated Users Only)
+app.post("/products/:productId/feedback", verifyUser, (req, res) => {
+  const { productId } = req.params;
+  const { feedback_text, feedback_rating } = req.body;
+  if (
+    !feedback_text ||
+    !feedback_rating ||
+    feedback_rating < 1 ||
+    feedback_rating > 5
+  )
+    return res.status(400).json({ error: "Invalid feedback or rating" });
+  const sql =
+    "INSERT INTO feedback_tbl (product_id, feedback_text, feedback_rating, user_id) VALUES (?, ?, ?, ?)";
+  pool.query(
+    sql,
+    [productId, feedback_text, feedback_rating, req.user_id],
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res
+        .status(201)
+        .json({
+          message: "Feedback submitted successfully",
+          feedbackId: result.insertId,
+        });
+    }
+  );
+});
+
+// Get feedback for a product (Public Access)
+app.get("/products/:productId/feedback", (req, res) => {
+  const { productId } = req.params;
+  const sql =
+    "SELECT * FROM feedback_tbl WHERE product_id = ? ORDER BY feedback_date DESC";
+  pool.query(sql, [productId], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
+});
 
 // Utility function to wrap `mysql2` callbacks in Promises
 const query = (sql, params) =>
@@ -274,7 +421,15 @@ app.post("/place-order", verifyUser, async (req, res) => {
       (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
-      [orderId, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length]
+      [
+        orderId,
+        product_id,
+        quantity,
+        no_of_ends,
+        creel_type,
+        creel_pitch,
+        bobin_length,
+      ]
     );
 
     // Commit transaction
@@ -300,6 +455,33 @@ app.post("/place-order", verifyUser, async (req, res) => {
     if (connection) await rollbackTransaction(connection);
     console.error("Error placing order:", err);
     res.status(500).json({ error: "Failed to place order" });
+  }
+});
+
+app.get("/orders", verifyUser, async (req, res) => {
+  try {
+    // Fetch orders for the logged-in user
+    const orders = await query(
+      `
+      SELECT o.order_id, o.order_status, od.product_id, od.quantity, od.no_of_ends, 
+             od.creel_type, od.creel_pitch, od.bobin_length 
+      FROM order_tbl o
+      JOIN order_details_tbl od ON o.order_id = od.order_id
+      WHERE o.user_id = ?
+      `,
+      [req.user_id] // assuming req.user_id is the logged-in user's ID
+    );
+
+    // If no orders are found, return an empty array
+    if (!orders.length) {
+      return res.status(200).json({ orders: [] });
+    }
+
+    // Return the fetched orders as JSON
+    res.status(200).json({ orders });
+  } catch (err) {
+    console.error("Error fetching orders:", err);
+    res.status(500).json({ error: "Failed to fetch orders" });
   }
 });
 
