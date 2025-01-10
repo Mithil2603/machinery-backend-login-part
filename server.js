@@ -7,6 +7,7 @@ import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
 import jwt, { decode } from "jsonwebtoken";
+import nodemailer from "nodemailer";
 
 const salt = 10;
 const app = express();
@@ -42,6 +43,34 @@ pool.getConnection((err, connection) => {
   } else {
     console.log("Connected to the MySQL database.");
     connection.release(); // Release the connection back to the pool
+  }
+});
+
+const transporter = nodemailer.createTransport({
+  service: "gmail", // You can change this if you're using a different provider
+  auth: {
+    user: "mithilsuthar2603@gmail.com", // Your email address here
+    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
+  },
+});
+
+// Route to handle sending inquiries
+app.post("/send-inquiry", async (req, res) => {
+  const { email, inquiry } = req.body;
+
+  const mailOptions = {
+    from: email,
+    to: "mithilsuthar2603@gmail.com", // The email address you want to send to
+    subject: "New Inquiry",
+    text: `Inquiry from ${email}:\n\n${inquiry}`,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions); // Send the email using the transporter
+    res.status(200).json({ message: "Inquiry sent successfully!" });
+  } catch (error) {
+    console.error("Error sending email:", error); // Log the actual error
+    res.status(500).json({ error: "Error sending inquiry." });
   }
 });
 
