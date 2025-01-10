@@ -248,6 +248,26 @@ app.get("/categories", (req, res) => {
   });
 });
 
+// Route to fetch products by category ID
+// Route to fetch products by category ID
+app.get("/products/category/:categoryId", (req, res) => {
+  const { categoryId } = req.params;
+
+  const sql = "SELECT * FROM product_tbl WHERE category_id = ?";
+  pool.query(sql, [categoryId], (err, results) => {
+    if (err) {
+      console.error("Error fetching products by category:", err);
+      return res.status(500).json({ message: "Server error", error: err.message });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No products found for this category" });
+    }
+
+    res.status(200).json(results);
+  });
+});
+
 // Add a new category (Admin Access Only)
 app.post("/categories", verifyUser, async (req, res) => {
   // You can add additional admin verification logic here
