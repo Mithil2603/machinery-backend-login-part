@@ -100,17 +100,38 @@ app.get("/", verifyUser, (req, res) => {
 });
 
 app.post("/register", (req, res) => {
-  const sql =
-    "INSERT INTO user_tbl(user_type, first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+  const phoneNumberRegex = /^\+[1-9]\d{1,14}$/; // Basic regex to validate international phone number format
 
+   // Validate phone number format (e.g., +919876543210, +1 234 567 8901)
+   if (!phoneNumberRegex.test(req.body.phone_number)) {
+    return res.json({ Error: "Invalid phone number format. Please include country code." });
+  }
+
+  // Email validation
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
+  if (!emailRegex.test(req.body.email)) {
+    return res.json({ Error: "Invalid email format!" });
+  }
+
+  // Password validation (at least 6 characters, one number, one special character)
+  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+  if (!passwordRegex.test(req.body.user_password)) {
+    return res.json({ Error: "Password must be at least 6 characters long, contain a number and a special character." });
+  }
+
+  // SQL Insert Query - Now user_type is hardcoded to 'customer'
+  const sql =
+    "INSERT INTO user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, user_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+  // Hash password
   bcrypt.hash(req.body.user_password.toString(), salt, (err, hash) => {
     if (err) {
       console.error("Hashing Error:", err);
       return res.json({ Error: "Error while hashing password!" });
     }
 
+    // Values to insert - Add 'customer' as the user_type
     const values = [
-      req.body.user_type,
       req.body.first_name,
       req.body.last_name,
       req.body.email,
@@ -123,14 +144,14 @@ app.post("/register", (req, res) => {
       req.body.pincode,
       req.body.GST_no,
       hash,
+      'customer', // Automatically assigning the 'customer' type
     ];
 
+    // Query execution
     pool.query(sql, values, (err, result) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY") {
-          res
-            .status(409)
-            .json({ status: "Error", message: "Email already Exists" });
+          return res.status(409).json({ status: "Error", message: "Email already Exists" });
         }
         console.error("SQL Error:", err);
         return res.json({ Error: "Error inserting data in server" });
@@ -175,16 +196,17 @@ app.post("/login", (req, res) => {
 });
 
 app.get("/profile", verifyUser, (req, res) => {
-  const sql = "SELECT * FROM user_tbl WHERE first_name = ?";
-  pool.query(sql, [req.name], (err, data) => {
+  const sql = "SELECT * FROM user_tbl WHERE user_id = ?";
+  
+  pool.query(sql, [req.user_id], (err, data) => {
     if (err) {
       console.error("SQL Error:", err);
       return res.json({ Error: "Error fetching user profile data" });
     }
+
     if (data.length > 0) {
       // Exclude sensitive data like password from the response
       const userProfile = {
-        user_type: data[0].user_type,
         first_name: data[0].first_name,
         last_name: data[0].last_name,
         email: data[0].email,
@@ -203,6 +225,7 @@ app.get("/profile", verifyUser, (req, res) => {
     }
   });
 });
+
 
 app.put("/updateProfile", verifyUser, (req, res) => {
   const {
