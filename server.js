@@ -680,16 +680,17 @@ app.post("/place-order", verifyUser, async (req, res) => {
 
 app.get("/orders", verifyUser, async (req, res) => {
   try {
-    // Fetch orders for the logged-in user
+    // Fetch orders along with product name and order date for the logged-in user
     const orders = await query(
       `
-      SELECT o.order_id, o.order_status, od.product_id, od.quantity, od.no_of_ends, 
-             od.creel_type, od.creel_pitch, od.bobin_length 
+      SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
+             od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length 
       FROM order_tbl o
       JOIN order_details_tbl od ON o.order_id = od.order_id
+      JOIN product_tbl p ON od.product_id = p.product_id
       WHERE o.user_id = ?
       `,
-      [req.user_id] // assuming req.user_id is the logged-in user's ID
+      [req.user_id]
     );
 
     // If no orders are found, return an empty array
