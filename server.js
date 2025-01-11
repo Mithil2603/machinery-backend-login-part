@@ -85,7 +85,7 @@ const verifyAdmin = (req, res, next) => {
     if (err) {
       return res.status(403).json({ Error: "Token is not correct" });
     }
-    if (decode.user_type !== "admin") {
+    if (decode.user_type !== "Owner") {
       return res
         .status(403)
         .json({ Error: "You do not have admin privileges" });
@@ -788,6 +788,44 @@ app.get("/admin/recent-orders", async (req, res) => {
   } catch (error) {
     console.error("Error fetching pending orders:", error);
     res.status(500).json({ error: "Failed to fetch pending orders" });
+  }
+});
+
+// Fetch all users
+app.get("/users", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    pool.query(
+      "SELECT user_id, first_name, last_name, email, user_type FROM user_tbl",
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json(results);
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch users." });
+  }
+});
+
+// Delete a user
+app.delete("/users/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    pool.query(
+      "DELETE FROM user_tbl WHERE user_id = ?",
+      [id],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "User deleted successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete user." });
   }
 });
 
