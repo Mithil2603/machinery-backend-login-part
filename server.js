@@ -52,7 +52,7 @@ const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, 
+    pass: process.env.EMAIL_PASS,
   },
 });
 
@@ -86,7 +86,9 @@ const verifyAdmin = (req, res, next) => {
       return res.status(403).json({ Error: "Token is not correct" });
     }
     if (decode.user_type !== "admin") {
-      return res.status(403).json({ Error: "You do not have admin privileges" });
+      return res
+        .status(403)
+        .json({ Error: "You do not have admin privileges" });
     }
     req.name = decode.name;
     req.user_id = decode.user_id;
@@ -265,9 +267,13 @@ app.post("/login", (req, res) => {
             const name = data[0].first_name;
             const user_id = data[0].user_id;
             const user_type = data[0].user_type;
-            const token = jwt.sign({ name, user_id, user_type }, process.env.JWT_SECRET, {
-              expiresIn: "7d",
-            });
+            const token = jwt.sign(
+              { name, user_id, user_type },
+              process.env.JWT_SECRET,
+              {
+                expiresIn: "7d",
+              }
+            );
             res.cookie("token", token);
             return res.json({ status: "Success", user_type });
           } else {
@@ -336,7 +342,11 @@ app.post("/forgot-password", (req, res) => {
 
       // Send email with reset link
       const resetLink = `http://${process.env.HOST_IP}/reset-password/${resetToken}`;
-      sendEmail(email, "Password Reset Request", `Click here to reset your password: ${resetLink}`);
+      sendEmail(
+        email,
+        "Password Reset Request",
+        `Click here to reset your password: ${resetLink}`
+      );
 
       res.json({ status: "Success", message: "Password reset email sent!" });
     });
@@ -363,9 +373,11 @@ app.post("/reset-password", (req, res) => {
     bcrypt.hash(newPassword, salt, (err, hashedPassword) => {
       if (err) return res.status(500).json({ Error: "Hashing error!" });
 
-      const updateSql = "UPDATE user_tbl SET user_password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE reset_token = ?";
+      const updateSql =
+        "UPDATE user_tbl SET user_password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE reset_token = ?";
       pool.query(updateSql, [hashedPassword, token], (err, result) => {
-        if (err) return res.status(500).json({ Error: "Database update error!" });
+        if (err)
+          return res.status(500).json({ Error: "Database update error!" });
 
         res.json({ status: "Success", message: "Password has been reset!" });
       });
@@ -535,30 +547,35 @@ app.post("/products", verifyUser, verifyUser, verifyAdmin, async (req, res) => {
 });
 
 // Add feedback for a product (Authenticated Users Only)
-app.post("/products/:productId/feedback", verifyUser, verifyAdmin, (req, res) => {
-  const { productId } = req.params;
-  const { feedback_text, feedback_rating } = req.body;
-  if (
-    !feedback_text ||
-    !feedback_rating ||
-    feedback_rating < 1 ||
-    feedback_rating > 5
-  )
-    return res.status(400).json({ error: "Invalid feedback or rating" });
-  const sql =
-    "INSERT INTO feedback_tbl (product_id, feedback_text, feedback_rating, user_id) VALUES (?, ?, ?, ?)";
-  pool.query(
-    sql,
-    [productId, feedback_text, feedback_rating, req.user_id],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({
-        message: "Feedback submitted successfully",
-        feedbackId: result.insertId,
-      });
-    }
-  );
-});
+app.post(
+  "/products/:productId/feedback",
+  verifyUser,
+  verifyAdmin,
+  (req, res) => {
+    const { productId } = req.params;
+    const { feedback_text, feedback_rating } = req.body;
+    if (
+      !feedback_text ||
+      !feedback_rating ||
+      feedback_rating < 1 ||
+      feedback_rating > 5
+    )
+      return res.status(400).json({ error: "Invalid feedback or rating" });
+    const sql =
+      "INSERT INTO feedback_tbl (product_id, feedback_text, feedback_rating, user_id) VALUES (?, ?, ?, ?)";
+    pool.query(
+      sql,
+      [productId, feedback_text, feedback_rating, req.user_id],
+      (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(201).json({
+          message: "Feedback submitted successfully",
+          feedbackId: result.insertId,
+        });
+      }
+    );
+  }
+);
 
 // Get feedback for a product (Public Access)
 app.get("/products/:productId/feedback", (req, res) => {
@@ -703,6 +720,74 @@ app.get("/orders", verifyUser, async (req, res) => {
   } catch (err) {
     console.error("Error fetching orders:", err);
     res.status(500).json({ error: "Failed to fetch orders" });
+  }
+});
+
+app.get("/admin/total-users", async (req, res) => {
+  try {
+    const result = await query("SELECT COUNT(*) AS total_users FROM user_tbl");
+    res.status(200).json(result[0]);
+  } catch (error) {
+    console.error("Error fetching total users:", error);
+    res.status(500).json({ error: "Failed to fetch total users" });
+  }
+});
+
+app.get("/admin/pending-orders", async (req, res) => {
+  try {
+    const result = await query(
+      "SELECT COUNT(*) AS pending_orders FROM order_tbl WHERE order_status = 'Pending'"
+    );
+    res.status(200).json(result[0]);
+  } catch (error) {
+    console.error("Error fetching pending orders:", error);
+    res.status(500).json({ error: "Failed to fetch pending orders" });
+  }
+});
+
+app.get("/admin/revenue", async (req, res) => {
+  try {
+    const result = await query(
+      "SELECT SUM(payment_amount) AS total_revenue FROM payment_tbl WHERE payment_status = 'Completed'"
+    );
+    res.status(200).json(result[0]);
+  } catch (error) {
+    console.error("Error fetching revenue:", error);
+    res.status(500).json({ error: "Failed to fetch revenue" });
+  }
+});
+
+app.get("/admin/feedback-count", async (req, res) => {
+  try {
+    const result = await query(
+      "SELECT COUNT(*) AS feedback_count FROM feedback_tbl"
+    );
+    res.status(200).json(result[0]);
+  } catch (error) {
+    console.error("Error fetching feedback count:", error);
+    res.status(500).json({ error: "Failed to fetch feedback count" });
+  }
+});
+
+app.get("/admin/recent-orders", async (req, res) => {
+  try {
+    const result = await query(
+      `
+      SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
+             od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length 
+      FROM order_tbl o 
+      JOIN order_details_tbl od ON o.order_id = od.order_id 
+      JOIN product_tbl p ON od.product_id = p.product_id 
+      WHERE o.order_status = 'Pending' 
+      ORDER BY o.order_date DESC 
+      LIMIT 5
+      `
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching pending orders:", error);
+    res.status(500).json({ error: "Failed to fetch pending orders" });
   }
 });
 
