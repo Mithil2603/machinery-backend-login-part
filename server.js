@@ -76,6 +76,25 @@ app.post("/send-inquiry", async (req, res) => {
   }
 });
 
+const verifyAdmin = (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) {
+    return res.status(401).json({ Error: "You are not authenticated" });
+  }
+  jwt.verify(token, process.env.JWT_SECRET, (err, decode) => {
+    if (err) {
+      return res.status(403).json({ Error: "Token is not correct" });
+    }
+    if (decode.user_type !== "admin") {
+      return res.status(403).json({ Error: "You do not have admin privileges" });
+    }
+    req.name = decode.name;
+    req.user_id = decode.user_id;
+    req.user_type = decode.user_type;
+    next();
+  });
+};
+
 const verifyUser = (req, res, next) => {
   const token = req.cookies.token;
   if (!token) {
@@ -245,11 +264,12 @@ app.post("/login", (req, res) => {
           if (response) {
             const name = data[0].first_name;
             const user_id = data[0].user_id;
-            const token = jwt.sign({ name, user_id }, process.env.JWT_SECRET, {
+            const user_type = data[0].user_type;
+            const token = jwt.sign({ name, user_id, user_type }, process.env.JWT_SECRET, {
               expiresIn: "7d",
             });
             res.cookie("token", token);
-            return res.json({ status: "Success" });
+            return res.json({ status: "Success", user_type });
           } else {
             return res.json({ message: "Password does not match!" });
           }
@@ -451,7 +471,7 @@ app.get("/products/category/:categoryId", (req, res) => {
 });
 
 // Add a new category (Admin Access Only)
-app.post("/categories", verifyUser, async (req, res) => {
+app.post("/categories", verifyUser, verifyAdmin, async (req, res) => {
   // You can add additional admin verification logic here
   const { category_name, category_description, category_img } = req.body;
   const sql =
@@ -491,7 +511,7 @@ app.get("/products/:productId", (req, res) => {
 });
 
 // Add a new product (Admin Access Only)
-app.post("/products", verifyUser, async (req, res) => {
+app.post("/products", verifyUser, verifyUser, verifyAdmin, async (req, res) => {
   const { category_id, product_name, product_description, product_img } =
     req.body;
   const sql =
@@ -515,7 +535,7 @@ app.post("/products", verifyUser, async (req, res) => {
 });
 
 // Add feedback for a product (Authenticated Users Only)
-app.post("/products/:productId/feedback", verifyUser, (req, res) => {
+app.post("/products/:productId/feedback", verifyUser, verifyAdmin, (req, res) => {
   const { productId } = req.params;
   const { feedback_text, feedback_rating } = req.body;
   if (
