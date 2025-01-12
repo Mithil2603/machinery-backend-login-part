@@ -931,6 +931,116 @@ app.delete("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
+app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    pool.query(
+      `SELECT 
+         product_id, 
+         category_id,
+         user_id AS owner_id, 
+         product_name, 
+         product_description, 
+         product_img,
+         created_at, 
+         update_at 
+       FROM product_tbl`,
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json(results);
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch products." });
+  }
+});
+
+app.post("/products", verifyUser, verifyAdmin, async (req, res) => {
+  const { category_id, product_name, product_description, product_img } = req.body;
+
+  try {
+    await pool.query(
+      "INSERT INTO product_tbl (category_id, user_id, product_name, product_description, product_img, created_at, update_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
+      [
+        category_id,
+        req.user_id, // Correctly access req.user_id
+        product_name,
+        JSON.stringify(product_description),
+        JSON.stringify(product_img)
+      ]
+    );
+    res.status(201).json({ message: "Product created successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to create product." });
+  }
+});
+
+app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params; // The ID of the product to be updated
+  const { category_id, product_name, product_description, product_img } = req.body;
+  const user_id = req.user_id; // Correctly access req.user_id
+
+  // Ensure product_description is a valid JSON
+  let productDescriptionJson;
+  try {
+    productDescriptionJson = JSON.stringify(product_description);
+  } catch (error) {
+    return res.status(400).json({ message: "Invalid product description format." });
+  }
+
+  try {
+    pool.query(
+      `UPDATE product_tbl 
+       SET 
+         category_id = ?, 
+         user_id = ?, 
+         product_name = ?, 
+         product_description = ?, 
+         product_img = ?
+       WHERE product_id = ?`,
+      [
+        category_id,
+        user_id,
+        product_name,
+        JSON.stringify(product_description),
+        JSON.stringify(product_img),
+        id
+      ],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "Product updated successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update product." });
+  }
+});
+
+app.delete("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    pool.query(
+      "DELETE FROM product_tbl WHERE product_id = ?",
+      [id],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "Product deleted successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete product." });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server Started at ${PORT}`);
 });
