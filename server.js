@@ -459,7 +459,6 @@ app.get("/categories", (req, res) => {
 });
 
 // Route to fetch products by category ID
-// Route to fetch products by category ID
 app.get("/products/category/:categoryId", (req, res) => {
   const { categoryId } = req.params;
 
@@ -636,8 +635,6 @@ app.post("/place-order", verifyUser, async (req, res) => {
   } = req.body;
 
   let connection;
-
-  console.log("Request body:", req.body);
 
   try {
     // Start transaction
@@ -958,7 +955,8 @@ app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
 });
 
 app.post("/products", verifyUser, verifyAdmin, async (req, res) => {
-  const { category_id, product_name, product_description, product_img } = req.body;
+  const { category_id, product_name, product_description, product_img } =
+    req.body;
 
   try {
     await pool.query(
@@ -968,7 +966,7 @@ app.post("/products", verifyUser, verifyAdmin, async (req, res) => {
         req.user_id, // Correctly access req.user_id
         product_name,
         JSON.stringify(product_description),
-        JSON.stringify(product_img)
+        JSON.stringify(product_img),
       ]
     );
     res.status(201).json({ message: "Product created successfully." });
@@ -980,7 +978,8 @@ app.post("/products", verifyUser, verifyAdmin, async (req, res) => {
 
 app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
   const { id } = req.params; // The ID of the product to be updated
-  const { category_id, product_name, product_description, product_img } = req.body;
+  const { category_id, product_name, product_description, product_img } =
+    req.body;
   const user_id = req.user_id; // Correctly access req.user_id
 
   // Ensure product_description is a valid JSON
@@ -988,7 +987,9 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
   try {
     productDescriptionJson = JSON.stringify(product_description);
   } catch (error) {
-    return res.status(400).json({ message: "Invalid product description format." });
+    return res
+      .status(400)
+      .json({ message: "Invalid product description format." });
   }
 
   try {
@@ -1007,7 +1008,7 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
         product_name,
         JSON.stringify(product_description),
         JSON.stringify(product_img),
-        id
+        id,
       ],
       (error, results) => {
         if (error) {
@@ -1039,6 +1040,108 @@ app.delete("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
     console.error(error);
     res.status(500).json({ message: "Failed to delete product." });
   }
+});
+
+// Get all orders with details
+app.get("/admin/orders", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const ordersQuery = `
+      SELECT 
+        o.order_id, 
+        o.user_id, 
+        u.first_name, 
+        u.email, 
+        o.order_date, 
+        o.order_status,
+        od.order_details_id, 
+        od.product_id, 
+        p.product_name,
+        od.quantity, 
+        od.no_of_ends, 
+        od.creel_type, 
+        od.creel_pitch, 
+        od.bobin_length
+      FROM order_tbl o
+      LEFT JOIN user_tbl u ON o.user_id = u.user_id
+      LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
+      LEFT JOIN product_tbl p ON od.product_id = p.product_id
+      ORDER BY o.order_date DESC
+    `;
+
+    pool.query(ordersQuery, (error, results) => {
+      if (error) {
+        throw error;
+      }
+      res.status(200).json(results);
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch orders." });
+  }
+});
+
+// Update an order's status
+app.put("/orders/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params; // Order ID
+  const { order_status } = req.body;
+
+  if (
+    !["Pending", "Confirmed", "Shipped", "Cancelled", "Delivered"].includes(
+      order_status
+    )
+  ) {
+    return res.status(400).json({ message: "Invalid order status." });
+  }
+
+  try {
+    pool.query(
+      "UPDATE order_tbl SET order_status = ? WHERE order_id = ?",
+      [order_status, id],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "Order status updated successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update order status." });
+  }
+});
+
+// Delete an order
+app.delete("/orders/:id", verifyUser, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+
+  // First, delete from order_details_tbl
+  pool.query(
+    "DELETE FROM order_details_tbl WHERE order_id = ?",
+    [id],
+    (error, results) => {
+      if (error) {
+        console.error("Error deleting from order_details_tbl:", error.message);
+        return res
+          .status(500)
+          .json({ message: "Failed to delete order details." });
+      }
+
+      // Then, delete from order_tbl
+      pool.query(
+        "DELETE FROM order_tbl WHERE order_id = ?",
+        [id],
+        (error, results) => {
+          if (error) {
+            console.error("Error deleting from order_tbl:", error.message);
+            return res.status(500).json({ message: "Failed to delete order." });
+          }
+
+          // Success
+          res.status(200).json({ message: "Order deleted successfully." });
+        }
+      );
+    }
+  );
 });
 
 app.listen(PORT, () => {
