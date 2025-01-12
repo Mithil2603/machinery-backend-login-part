@@ -862,7 +862,12 @@ app.post("/categories", verifyUser, verifyAdmin, async (req, res) => {
   try {
     await pool.query(
       "INSERT INTO category_tbl (category_name, category_description, category_img, created_at, update_at, user_id) VALUES (?, ?, ?, NOW(), NOW(), ?)",
-      [category_name, category_description, JSON.stringify(category_img), req.user.id]
+      [
+        category_name,
+        category_description,
+        JSON.stringify(category_img),
+        req.user.id,
+      ]
     );
     res.status(201).json({ message: "Category created successfully." });
   } catch (error) {
@@ -871,13 +876,11 @@ app.post("/categories", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
-
 // Update a category
 app.put("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
   const { id } = req.params; // The ID of the category to be updated
-  const { category_name, category_description, category_img, update_at } =
-    req.body;
-  const user_id = req.user_id; 
+  const { category_name, category_description, category_img } = req.body;
+  const user_id = req.user_id; // Correctly access req.user_id
 
   try {
     pool.query(
@@ -886,15 +889,13 @@ app.put("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
          user_id = ?, 
          category_name = ?, 
          category_description = ?, 
-         category_img = ?, 
-         update_at = ?
+         category_img = ?
        WHERE category_id = ?`,
       [
         user_id,
         category_name,
         category_description,
         JSON.stringify(category_img),
-        update_at,
         id,
       ],
       (error, results) => {
