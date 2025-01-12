@@ -829,6 +829,107 @@ app.delete("/users/:id", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
+// Fetch all categories
+app.get("/categories", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    pool.query(
+      `SELECT 
+         category_id, 
+         user_id AS owner_id, 
+         category_name, 
+         category_description, 
+         category_img, 
+         created_at, 
+         update_at 
+       FROM category_tbl`,
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json(results);
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch categories." });
+  }
+});
+
+// Create a new category
+app.post("/categories", verifyUser, verifyAdmin, async (req, res) => {
+  const { category_name, category_description, category_img } = req.body;
+
+  try {
+    await pool.query(
+      "INSERT INTO category_tbl (category_name, category_description, category_img, created_at, update_at, user_id) VALUES (?, ?, ?, NOW(), NOW(), ?)",
+      [category_name, category_description, JSON.stringify(category_img), req.user.id]
+    );
+    res.status(201).json({ message: "Category created successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to create category." });
+  }
+});
+
+
+// Update a category
+app.put("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params; // The ID of the category to be updated
+  const { category_name, category_description, category_img, update_at } =
+    req.body;
+  const user_id = req.user_id; 
+
+  try {
+    pool.query(
+      `UPDATE category_tbl 
+       SET 
+         user_id = ?, 
+         category_name = ?, 
+         category_description = ?, 
+         category_img = ?, 
+         update_at = ?
+       WHERE category_id = ?`,
+      [
+        user_id,
+        category_name,
+        category_description,
+        JSON.stringify(category_img),
+        update_at,
+        id,
+      ],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "Category updated successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to update category." });
+  }
+});
+
+// Delete a category
+app.delete("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    pool.query(
+      "DELETE FROM category_tbl WHERE category_id = ?",
+      [id],
+      (error, results) => {
+        if (error) {
+          throw error;
+        }
+        res.status(200).json({ message: "Category deleted successfully." });
+      }
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to delete category." });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server Started at ${PORT}`);
 });
