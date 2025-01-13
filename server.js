@@ -928,71 +928,137 @@ app.delete("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 
+// GET /products
 app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
+  const { category_id, product_name, page = 1, limit = 10 } = req.query;
+  const offset = (page - 1) * limit;
+
   try {
-    pool.query(
-      `SELECT 
-         product_id, 
-         category_id,
-         user_id AS owner_id, 
-         product_name, 
-         product_description, 
-         product_img,
-         created_at, 
-         update_at 
-       FROM product_tbl`,
-      (error, results) => {
-        if (error) {
-          throw error;
-        }
-        res.status(200).json(results);
+    let query = `
+      SELECT 
+        product_id, 
+        category_id,
+        user_id AS owner_id, 
+        product_name, 
+        product_description, 
+        product_img,
+        created_at, 
+        update_at 
+      FROM product_tbl
+    `;
+    const params = [];
+
+    // Add filters
+    if (category_id) {
+      query += " WHERE category_id = ?";
+      params.push(category_id);
+    }
+
+    if (product_name) {
+      query += params.length ? " AND" : " WHERE";
+      query += " product_name LIKE ?";
+      params.push(`%${product_name}%`);
+    }
+
+    query += ` LIMIT ? OFFSET ?`;
+    params.push(Number(limit), Number(offset));
+
+    pool.query(query, params, (error, results) => {
+      if (error) {
+        throw error;
       }
-    );
+
+      // Parse JSON fields for response
+      const parsedResults = results.map((result) => ({
+        ...result,
+        product_description: JSON.parse(result.product_description || "[]"),
+        product_img: JSON.parse(result.product_img || "[]"),
+      }));
+
+      res.status(200).json(parsedResults);
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to fetch products." });
   }
 });
 
+// POST /products
 app.post("/products", verifyUser, verifyAdmin, async (req, res) => {
   const { category_id, product_name, product_description, product_img } =
     req.body;
 
   try {
-    await pool.query(
-      "INSERT INTO product_tbl (category_id, user_id, product_name, product_description, product_img, created_at, update_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
+    // Parse the product description input (admin enters like: ["RTR, RTF", "Hi, Hello"])
+    let parsedDescription = [];
+    try {
+      parsedDescription = JSON.parse(product_description); // Parsing the input JSON string
+      if (!Array.isArray(parsedDescription)) {
+        return res.status(400).json({
+          message: "Invalid JSON array format for product description.",
+        });
+      }
+    } catch (error) {
+      return res
+        .status(400)
+        .json({ message: "Invalid JSON format for product description." });
+    }
+
+    const productDescriptionJson = JSON.stringify(parsedDescription); // Store as JSON string
+    const productImgJson = JSON.stringify(product_img || []);
+
+    pool.query(
+      `INSERT INTO product_tbl 
+         (category_id, user_id, product_name, product_description, product_img, created_at, update_at) 
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         category_id,
-        req.user_id, // Correctly access req.user_id
+        req.user_id,
         product_name,
-        JSON.stringify(product_description),
-        JSON.stringify(product_img),
-      ]
+        productDescriptionJson,
+        productImgJson,
+      ],
+      (error, results) => {
+        if (error) {
+          return res.status(500).json({ message: "Database error." });
+        }
+        res.status(201).json({ message: "Product created successfully." });
+      }
     );
-    res.status(201).json({ message: "Product created successfully." });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Failed to create product." });
   }
 });
 
+// PUT /products/:id
 app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
-  const { id } = req.params; // The ID of the product to be updated
+  const { id } = req.params;
   const { category_id, product_name, product_description, product_img } =
     req.body;
-  const user_id = req.user_id; // Correctly access req.user_id
-
-  // Ensure product_description is a valid JSON
-  let productDescriptionJson;
-  try {
-    productDescriptionJson = JSON.stringify(product_description);
-  } catch (error) {
-    return res
-      .status(400)
-      .json({ message: "Invalid product description format." });
-  }
+  const user_id = req.user_id;
 
   try {
+    // Parse the product description input (admin enters like: ["RTR, RTF", "Hi, Hello"])
+    let parsedDescription = [];
+    try {
+      parsedDescription = JSON.parse(product_description); // Parsing the input JSON string
+      if (!Array.isArray(parsedDescription)) {
+        return res
+          .status(400)
+          .json({
+            message: "Invalid JSON array format for product description.",
+          });
+      }
+    } catch (error) {
+      return res
+        .status(400)
+        .json({ message: "Invalid JSON format for product description." });
+    }
+
+    const productDescriptionJson = JSON.stringify(parsedDescription); // Store as JSON string
+    const productImgJson = JSON.stringify(product_img || []);
+
     pool.query(
       `UPDATE product_tbl 
        SET 
@@ -1006,14 +1072,19 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
         category_id,
         user_id,
         product_name,
-        JSON.stringify(product_description),
-        JSON.stringify(product_img),
+        productDescriptionJson,
+        productImgJson,
         id,
       ],
       (error, results) => {
         if (error) {
-          throw error;
+          return res.status(500).json({ message: "Database error." });
         }
+
+        if (results.affectedRows === 0) {
+          return res.status(404).json({ message: "Product not found." });
+        }
+
         res.status(200).json({ message: "Product updated successfully." });
       }
     );
