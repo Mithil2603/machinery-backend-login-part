@@ -549,22 +549,21 @@ app.post("/products", verifyUser, verifyUser, verifyAdmin, async (req, res) => {
 app.post(
   "/products/:productId/feedback",
   verifyUser,
-  verifyAdmin,
   (req, res) => {
     const { productId } = req.params;
-    const { feedback_text, feedback_rating } = req.body;
+    const { comment, rating } = req.body;
     if (
-      !feedback_text ||
-      !feedback_rating ||
-      feedback_rating < 1 ||
-      feedback_rating > 5
+      !comment ||
+      !rating ||
+      rating < 1 ||
+      rating > 5
     )
       return res.status(400).json({ error: "Invalid feedback or rating" });
     const sql =
-      "INSERT INTO feedback_tbl (product_id, feedback_text, feedback_rating, user_id) VALUES (?, ?, ?, ?)";
+      "INSERT INTO feedback_tbl (product_id, comment, rating, user_id) VALUES (?, ?, ?, ?)";
     pool.query(
       sql,
-      [productId, feedback_text, feedback_rating, req.user_id],
+      [productId, comment, rating, req.user_id],
       (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         res.status(201).json({
@@ -576,11 +575,21 @@ app.post(
   }
 );
 
-// Get feedback for a product (Public Access)
+// Get all feedback for a product
 app.get("/products/:productId/feedback", (req, res) => {
   const { productId } = req.params;
-  const sql =
-    "SELECT * FROM feedback_tbl WHERE product_id = ? ORDER BY feedback_date DESC";
+  const sql = `
+    SELECT 
+      f.feedback_id, 
+      f.comment, 
+      f.rating, 
+      f.created_at, 
+      u.first_name 
+    FROM feedback_tbl f
+    JOIN user_tbl u ON f.user_id = u.user_id
+    WHERE f.product_id = ? 
+    ORDER BY f.created_at DESC;
+  `;
   pool.query(sql, [productId], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.status(200).json(results);
@@ -1044,11 +1053,9 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
     try {
       parsedDescription = JSON.parse(product_description); // Parsing the input JSON string
       if (!Array.isArray(parsedDescription)) {
-        return res
-          .status(400)
-          .json({
-            message: "Invalid JSON array format for product description.",
-          });
+        return res.status(400).json({
+          message: "Invalid JSON array format for product description.",
+        });
       }
     } catch (error) {
       return res
