@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import dotenv, { config } from "dotenv";
 dotenv.config();
 import express from "express";
 import bodyParser from "body-parser";
@@ -10,6 +10,7 @@ import jwt, { decode } from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import { ExpressValidator } from "express-validator";
 import crypto from "crypto";
+import Razorpay from "razorpay";
 
 const salt = 10;
 const app = express();
@@ -546,34 +547,21 @@ app.post("/products", verifyUser, verifyUser, verifyAdmin, async (req, res) => {
 });
 
 // Add feedback for a product (Authenticated Users Only)
-app.post(
-  "/products/:productId/feedback",
-  verifyUser,
-  (req, res) => {
-    const { productId } = req.params;
-    const { comment, rating } = req.body;
-    if (
-      !comment ||
-      !rating ||
-      rating < 1 ||
-      rating > 5
-    )
-      return res.status(400).json({ error: "Invalid feedback or rating" });
-    const sql =
-      "INSERT INTO feedback_tbl (product_id, comment, rating, user_id) VALUES (?, ?, ?, ?)";
-    pool.query(
-      sql,
-      [productId, comment, rating, req.user_id],
-      (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({
-          message: "Feedback submitted successfully",
-          feedbackId: result.insertId,
-        });
-      }
-    );
-  }
-);
+app.post("/products/:productId/feedback", verifyUser, (req, res) => {
+  const { productId } = req.params;
+  const { comment, rating } = req.body;
+  if (!comment || !rating || rating < 1 || rating > 5)
+    return res.status(400).json({ error: "Invalid feedback or rating" });
+  const sql =
+    "INSERT INTO feedback_tbl (product_id, comment, rating, user_id) VALUES (?, ?, ?, ?)";
+  pool.query(sql, [productId, comment, rating, req.user_id], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({
+      message: "Feedback submitted successfully",
+      feedbackId: result.insertId,
+    });
+  });
+});
 
 // Get all feedback for a product
 app.get("/products/:productId/feedback", (req, res) => {
@@ -703,14 +691,18 @@ app.post("/place-order", verifyUser, async (req, res) => {
 
 app.get("/orders", verifyUser, async (req, res) => {
   try {
-    // Fetch orders along with product name and order date for the logged-in user
+    // Fetch orders along with product, order, and payment details
     const orders = await query(
       `
-      SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
-             od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length 
+      SELECT 
+        o.order_id, o.order_status, o.order_date, 
+        od.product_id, p.product_name, 
+        od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
+        pm.payment_amount, pm.remaining_amount, pm.payment_status
       FROM order_tbl o
       JOIN order_details_tbl od ON o.order_id = od.order_id
       JOIN product_tbl p ON od.product_id = p.product_id
+      LEFT JOIN payment_tbl pm ON o.order_id = pm.order_id
       WHERE o.user_id = ?
       `,
       [req.user_id]
@@ -1220,6 +1212,107 @@ app.delete("/orders/:id", verifyUser, verifyAdmin, (req, res) => {
       );
     }
   );
+});
+
+app.post("/admin/payments", verifyUser, verifyAdmin, (req, res) => {
+  const {
+    payment_amount,
+    payment_method,
+    installment_number,
+    payment_type,
+    total_amount,
+    order_id,
+    remaining_amount,
+  } = req.body;
+
+  // Example SQL query
+  const sql = `
+    INSERT INTO payment_tbl (
+      payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, remaining_amount
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  pool.query(
+    sql,
+    [
+      payment_amount,
+      payment_method,
+      installment_number,
+      payment_type,
+      total_amount,
+      order_id,
+      remaining_amount,
+    ],
+    (err, result) => {
+      if (err) {
+        console.error("Error processing payment:", err);
+        res.status(500).send("Failed to process payment.");
+        return;
+      }
+      res.status(200).send("Payment created successfully.");
+    }
+  );
+});
+
+app.post("/create-order", async (req, res) => {
+  try {
+    const razorpay = new Razorpay({
+      key_id: process.env.KEY_ID,
+      key_secret: process.env.KEY_SECRET,
+    });
+
+    const options = req.body;
+
+    // Ensure the amount is an integer and in the smallest unit (e.g., paise)
+    const amount = Math.round(options.amount * 100); // if in rupees, convert to paise
+
+    const orderOptions = {
+      amount, // Razorpay expects amount in the smallest unit
+      currency: "INR", // Or other currency based on your needs
+      receipt: options.order_id.toString(),
+      payment_capture: 1, // auto-capture the payment
+    };
+
+    const order = await razorpay.orders.create(orderOptions);
+    if (!order) {
+      return res.status(500).send("Error creating order");
+    }
+
+    // Send order details back to frontend
+    res.json({
+      key: process.env.KEY_ID,
+      order: order,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).send("Error creating Razorpay order");
+  }
+});
+
+app.post("/verify-payment", verifyUser, async (req, res) => {
+  const { payment_id, order_id, signature } = req.body;
+
+  try {
+    const generatedSignature = crypto
+      .createHmac("sha256", "your_razorpay_key_secret")
+      .update(order_id + "|" + payment_id)
+      .digest("hex");
+
+    if (generatedSignature !== signature) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    // Update payment status in database (e.g., mark as paid)
+    await query(
+      "UPDATE payment_tbl SET payment_status = 'Paid' WHERE order_id = ?",
+      [order_id]
+    );
+
+    res.status(200).json({ message: "Payment verified successfully" });
+  } catch (error) {
+    console.error("Error verifying payment:", error);
+    res.status(500).json({ error: "Payment verification failed" });
+  }
 });
 
 app.listen(PORT, () => {
