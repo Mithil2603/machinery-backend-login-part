@@ -1254,64 +1254,118 @@ app.post("/admin/payments", verifyUser, verifyAdmin, (req, res) => {
   );
 });
 
-app.post("/create-order", async (req, res) => {
-  try {
-    const razorpay = new Razorpay({
-      key_id: process.env.KEY_ID,
-      key_secret: process.env.KEY_SECRET,
-    });
+app.post("/create-order", (req, res) => {
+  const razorpay = new Razorpay({
+    key_id: process.env.KEY_ID,
+    key_secret: process.env.KEY_SECRET,
+  });
 
-    const options = req.body;
+  const options = req.body;
 
-    // Ensure the amount is an integer and in the smallest unit (e.g., paise)
-    const amount = Math.round(options.amount * 100); // if in rupees, convert to paise
+  // Fetch the payment details from the database using order_id
+  const sql = "SELECT * FROM payment_tbl WHERE order_id = ?";
+  pool.query(sql, [options.order_id], (err, results) => {
+    if (err) {
+      console.error("Error fetching payment details:", err);
+      return res.status(500).send("Error fetching payment details");
+    }
+
+    if (results.length === 0) {
+      return res.status(404).send("Payment details not found for this order.");
+    }
+
+    const paymentDetails = results[0];
+
+    // Ensure the amount is in the smallest unit (e.g., paise)
+    const amount = Math.round(paymentDetails.payment_amount * 100); // Convert to paise
 
     const orderOptions = {
       amount, // Razorpay expects amount in the smallest unit
-      currency: "INR", // Or other currency based on your needs
-      receipt: options.order_id.toString(),
+      currency: "INR",
+      receipt: paymentDetails.order_id.toString(),
       payment_capture: 1, // auto-capture the payment
     };
 
-    const order = await razorpay.orders.create(orderOptions);
-    if (!order) {
-      return res.status(500).send("Error creating order");
-    }
+    razorpay.orders.create(orderOptions, (err, order) => {
+      if (err) {
+        console.error("Error creating Razorpay order:", err);
+        return res.status(500).send("Error creating Razorpay order");
+      }
 
-    // Send order details back to frontend
-    res.json({
-      key: process.env.KEY_ID,
-      order: order,
+      console.log("Razorpay order created successfully:", order);
+
+      // Update the payment_tbl with the Razorpay order ID
+      const updateSql = `
+        UPDATE payment_tbl 
+        SET razorpay_order_id = ?, payment_status = 'Pending' 
+        WHERE order_id = ?
+      `;
+      pool.query(updateSql, [order.id, options.order_id], (updateErr) => {
+        if (updateErr) {
+          console.error(
+            "Error updating Razorpay order ID in database:",
+            updateErr
+          );
+          return res
+            .status(500)
+            .send("Error saving Razorpay order ID to database");
+        }
+
+        console.log("Razorpay order ID updated in database successfully.");
+
+        // Send the response to the frontend
+        res.json({
+          key: process.env.KEY_ID,
+          order: order,
+        });
+      });
     });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).send("Error creating Razorpay order");
-  }
+  });
 });
 
-app.post("/verify-payment", verifyUser, async (req, res) => {
-  const { payment_id, order_id, signature } = req.body;
+app.post("/verify-payment", async (req, res) => {
+  const { payment_id, order_id: razorpay_order_id, signature } = req.body;
 
-  try {
-    const generatedSignature = crypto
-      .createHmac("sha256", "your_razorpay_key_secret")
-      .update(order_id + "|" + payment_id)
-      .digest("hex");
+  // Generate the expected signature
+  const generatedSignature = crypto
+    .createHmac("sha256", process.env.KEY_SECRET)
+    .update(razorpay_order_id + "|" + payment_id)
+    .digest("hex");
 
-    if (generatedSignature !== signature) {
-      return res.status(400).json({ error: "Invalid signature" });
+  // Compare the generated signature with the received signature
+  if (generatedSignature === signature) {
+    console.log("Payment verification successful");
+
+    try {
+      // Step 1: Fetch the database order_id using razorpay_order_id
+      const fetchSql =
+        "SELECT order_id FROM payment_tbl WHERE razorpay_order_id = ?";
+      const [rows] = await pool.promise().query(fetchSql, [razorpay_order_id]);
+
+      if (rows.length === 0) {
+        console.error("No matching order found for Razorpay order ID");
+        return res.status(400).json({ error: "Order not found" });
+      }
+
+      const dbOrderId = rows[0].order_id;
+
+      // Step 2: Update the payment status and remaining amount in payment_tbl
+      const updateSql = `
+        UPDATE payment_tbl 
+        SET payment_status = 'Completed', remaining_amount = 0 
+        WHERE order_id = ?
+      `;
+      await pool.promise().query(updateSql, [dbOrderId]);
+
+      console.log("Order status updated successfully");
+      res.status(200).json({ message: "Payment verified successfully" });
+    } catch (err) {
+      console.error("Error updating order status:", err);
+      res.status(500).json({ error: "Error updating order status" });
     }
-
-    // Update payment status in database (e.g., mark as paid)
-    await query(
-      "UPDATE payment_tbl SET payment_status = 'Paid' WHERE order_id = ?",
-      [order_id]
-    );
-
-    res.status(200).json({ message: "Payment verified successfully" });
-  } catch (error) {
-    console.error("Error verifying payment:", error);
-    res.status(500).json({ error: "Payment verification failed" });
+  } else {
+    console.log("Payment verification failed");
+    res.status(400).json({ error: "Invalid signature" });
   }
 });
 
