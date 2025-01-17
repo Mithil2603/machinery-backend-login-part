@@ -1214,6 +1214,36 @@ app.delete("/orders/:id", verifyUser, verifyAdmin, (req, res) => {
   );
 });
 
+// GET all payments
+app.get("/admin/payments", (req, res) => {
+  const sql = `
+    SELECT 
+      razorpay_order_id,
+      payment_id,
+      order_id,
+      payment_amount,
+      payment_date,
+      payment_method,
+      bill,
+      payment_status,
+      total_amount,
+      remaining_amount,
+      installment_number,
+      payment_type,
+      created_at,
+      update_at
+    FROM payment_tbl
+  `;
+  pool.query(sql, (err, results) => {
+    if (err) {
+      console.error("Error fetching payments:", err);
+      res.status(500).json({ message: "Failed to fetch payments" });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
 app.post("/admin/payments", verifyUser, verifyAdmin, (req, res) => {
   const {
     payment_amount,
@@ -1292,8 +1322,6 @@ app.post("/create-order", (req, res) => {
         return res.status(500).send("Error creating Razorpay order");
       }
 
-      console.log("Razorpay order created successfully:", order);
-
       // Update the payment_tbl with the Razorpay order ID
       const updateSql = `
         UPDATE payment_tbl 
@@ -1310,8 +1338,6 @@ app.post("/create-order", (req, res) => {
             .status(500)
             .send("Error saving Razorpay order ID to database");
         }
-
-        console.log("Razorpay order ID updated in database successfully.");
 
         // Send the response to the frontend
         res.json({
@@ -1357,14 +1383,12 @@ app.post("/verify-payment", async (req, res) => {
       `;
       await pool.promise().query(updateSql, [dbOrderId]);
 
-      console.log("Order status updated successfully");
       res.status(200).json({ message: "Payment verified successfully" });
     } catch (err) {
       console.error("Error updating order status:", err);
       res.status(500).json({ error: "Error updating order status" });
     }
   } else {
-    console.log("Payment verification failed");
     res.status(400).json({ error: "Invalid signature" });
   }
 });
