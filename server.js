@@ -631,54 +631,91 @@ app.post("/place-order", verifyUser, async (req, res) => {
     bobin_length,
   } = req.body;
 
-  let connection;
+  // Convert fields to numbers
+  const quantityNum = Number(quantity);
+  const noOfEndsNum = Number(no_of_ends);
+  const creelPitchNum = Number(creel_pitch);
+  const bobinLengthNum = Number(bobin_length);
 
+  // Validation
+  if (
+    !product_id ||
+    !quantity ||
+    !no_of_ends ||
+    !creel_type ||
+    !creel_pitch ||
+    !bobin_length
+  ) {
+    return res.status(400).json({ error: "All fields are required." });
+  }
+
+  if (isNaN(quantityNum) || quantityNum <= 0) {
+    return res
+      .status(400)
+      .json({ error: "Quantity must be a positive number." });
+  }
+
+  if (isNaN(noOfEndsNum) || noOfEndsNum <= 0) {
+    return res
+      .status(400)
+      .json({ error: "No of Ends must be a positive number." });
+  }
+
+  if (isNaN(creelPitchNum) || creelPitchNum <= 0) {
+    return res
+      .status(400)
+      .json({ error: "Creel Pitch must be a positive number." });
+  }
+
+  if (isNaN(bobinLengthNum) || bobinLengthNum <= 0) {
+    return res
+      .status(400)
+      .json({ error: "Bobin Length must be a positive number." });
+  }
+
+  if (!["O", "U"].includes(creel_type)) {
+    return res
+      .status(400)
+      .json({ error: "Invalid Creel Type. Allowed values are 'O' and 'U'." });
+  }
+
+  // Proceed with database operations
   try {
-    // Start transaction
-    connection = await beginTransaction();
+    const connection = await beginTransaction();
 
-    // Insert into `order_tbl`
     const orderResult = await query(
       "INSERT INTO order_tbl (user_id, order_status) VALUES (?, ?)",
       [req.user_id, "Pending"]
     );
-    // console.log("User ID:", req.user_id); // Log the value of user_id
     const orderId = orderResult.insertId;
 
-    // Insert into `order_details_tbl`
     await query(
-      `
-      INSERT INTO order_details_tbl 
-      (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `,
+      `INSERT INTO order_details_tbl 
+         (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         orderId,
         product_id,
-        quantity,
-        no_of_ends,
+        quantityNum,
+        noOfEndsNum,
         creel_type,
-        creel_pitch,
-        bobin_length,
+        creelPitchNum,
+        bobinLengthNum,
       ]
     );
 
-    // Commit transaction
     await commitTransaction(connection);
 
-    // Generate WhatsApp notification URL
-    const ownerNumber = "917041177240"; // Replace with owner's WhatsApp number
-    const message = encodeURIComponent(`
-      New Order Placed!
-      Order ID: ${orderId}
-      Product ID: ${product_id}
-      Quantity: ${quantity}
-      Specifications:
-      - No. of Ends: ${no_of_ends}
-      - Creel Type: ${creel_type}
-      - Creel Pitch: ${creel_pitch}
-      - Bobin Length: ${bobin_length}
-    `);
+    const ownerNumber = "917041177240";
+    const message = encodeURIComponent(`New Order Placed!
+          Order ID: ${orderId}
+          Product ID: ${product_id}
+          Quantity: ${quantityNum}
+          Specifications:
+          - No. of Ends: ${noOfEndsNum}
+          - Creel Type: ${creel_type}
+          - Creel Pitch: ${creelPitchNum}
+          - Bobin Length: ${bobinLengthNum}`);
     const whatsappURL = `https://wa.me/${ownerNumber}?text=${message}`;
 
     res.status(200).json({ orderId, whatsappURL });
@@ -698,7 +735,7 @@ app.get("/orders", verifyUser, async (req, res) => {
         o.order_id, o.order_status, o.order_date, 
         od.product_id, p.product_name, 
         od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
-        pm.payment_amount, pm.remaining_amount, pm.payment_status
+        pm.payment_amount, pm.remaining_amount, pm.payment_status, pm.installment_number
       FROM order_tbl o
       JOIN order_details_tbl od ON o.order_id = od.order_id
       JOIN product_tbl p ON od.product_id = p.product_id
@@ -1244,44 +1281,59 @@ app.get("/admin/payments", (req, res) => {
   });
 });
 
-app.post("/admin/payments", verifyUser, verifyAdmin, (req, res) => {
+app.post("/admin/payments", verifyUser, verifyAdmin, async (req, res) => {
   const {
     payment_amount,
     payment_method,
-    installment_number,
     payment_type,
-    total_amount,
     order_id,
-    remaining_amount,
+    total_amount,
+    installment_number,
   } = req.body;
 
-  // Example SQL query
-  const sql = `
-    INSERT INTO payment_tbl (
-      payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, remaining_amount
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `;
+  try {
+    // Validate required fields
+    if (
+      !payment_amount ||
+      !payment_method ||
+      !payment_type ||
+      !order_id ||
+      !installment_number
+    ) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
 
-  pool.query(
-    sql,
-    [
-      payment_amount,
+    const paymentAmount = parseFloat(payment_amount);
+    const totalAmount = parseFloat(total_amount);
+
+    // Fetch the last installment details (if needed for any other logic)
+    const lastInstallmentSql =
+      "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
+    const [lastInstallmentRows] = await pool
+      .promise()
+      .query(lastInstallmentSql, [order_id, installment_number - 1]);
+
+    // Insert the new payment record
+    const sql = `
+      INSERT INTO payment_tbl (
+        payment_amount, payment_method, installment_number, payment_type, total_amount, order_id
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `;
+
+    await pool.promise().query(sql, [
+      paymentAmount,
       payment_method,
       installment_number,
       payment_type,
-      total_amount,
+      totalAmount, // You can still keep total_amount if needed for the first installment
       order_id,
-      remaining_amount,
-    ],
-    (err, result) => {
-      if (err) {
-        console.error("Error processing payment:", err);
-        res.status(500).send("Failed to process payment.");
-        return;
-      }
-      res.status(200).send("Payment created successfully.");
-    }
-  );
+    ]);
+
+    res.status(200).send("Payment created successfully.");
+  } catch (err) {
+    console.error("Error processing payment:", err);
+    res.status(500).send("Failed to process payment.");
+  }
 });
 
 app.post("/create-order", (req, res) => {
@@ -1293,60 +1345,71 @@ app.post("/create-order", (req, res) => {
   const options = req.body;
 
   // Fetch the payment details from the database using order_id
-  const sql = "SELECT * FROM payment_tbl WHERE order_id = ?";
-  pool.query(sql, [options.order_id], (err, results) => {
-    if (err) {
-      console.error("Error fetching payment details:", err);
-      return res.status(500).send("Error fetching payment details");
-    }
-
-    if (results.length === 0) {
-      return res.status(404).send("Payment details not found for this order.");
-    }
-
-    const paymentDetails = results[0];
-
-    // Ensure the amount is in the smallest unit (e.g., paise)
-    const amount = Math.round(paymentDetails.payment_amount * 100); // Convert to paise
-
-    const orderOptions = {
-      amount, // Razorpay expects amount in the smallest unit
-      currency: "INR",
-      receipt: paymentDetails.order_id.toString(),
-      payment_capture: 1, // auto-capture the payment
-    };
-
-    razorpay.orders.create(orderOptions, (err, order) => {
+  const sql =
+    "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
+  pool.query(
+    sql,
+    [options.order_id, options.installment_number],
+    (err, results) => {
       if (err) {
-        console.error("Error creating Razorpay order:", err);
-        return res.status(500).send("Error creating Razorpay order");
+        console.error("Error fetching payment details:", err);
+        return res.status(500).send("Error fetching payment details");
       }
 
-      // Update the payment_tbl with the Razorpay order ID
-      const updateSql = `
-        UPDATE payment_tbl 
-        SET razorpay_order_id = ?, payment_status = 'Pending' 
-        WHERE order_id = ?
-      `;
-      pool.query(updateSql, [order.id, options.order_id], (updateErr) => {
-        if (updateErr) {
-          console.error(
-            "Error updating Razorpay order ID in database:",
-            updateErr
-          );
-          return res
-            .status(500)
-            .send("Error saving Razorpay order ID to database");
+      if (results.length === 0) {
+        return res
+          .status(404)
+          .send("Payment details not found for this order and installment.");
+      }
+
+      const paymentDetails = results[0];
+
+      // Ensure the amount is in the smallest unit (e.g., paise)
+      const amount = Math.round(paymentDetails.payment_amount * 100); // Convert to paise
+
+      const orderOptions = {
+        amount, // Razorpay expects amount in the smallest unit
+        currency: "INR",
+        receipt: paymentDetails.order_id.toString(),
+        payment_capture: 1, // auto-capture the payment
+      };
+
+      razorpay.orders.create(orderOptions, (err, order) => {
+        if (err) {
+          console.error("Error creating Razorpay order:", err);
+          return res.status(500).send("Error creating Razorpay order");
         }
 
-        // Send the response to the frontend
-        res.json({
-          key: process.env.KEY_ID,
-          order: order,
-        });
+        // Update the payment_tbl with the Razorpay order ID
+        const updateSql = `
+        UPDATE payment_tbl 
+        SET razorpay_order_id = ?, payment_status = 'Pending' 
+        WHERE order_id = ? AND installment_number = ?
+      `;
+        pool.query(
+          updateSql,
+          [order.id, options.order_id, options.installment_number],
+          (updateErr) => {
+            if (updateErr) {
+              console.error(
+                "Error updating Razorpay order ID in database:",
+                updateErr
+              );
+              return res
+                .status(500)
+                .send("Error saving Razorpay order ID to database");
+            }
+
+            // Send the response to the frontend
+            res.json({
+              key: process.env.KEY_ID,
+              order: order,
+            });
+          }
+        );
       });
-    });
-  });
+    }
+  );
 });
 
 app.post("/verify-payment", async (req, res) => {
@@ -1360,12 +1423,10 @@ app.post("/verify-payment", async (req, res) => {
 
   // Compare the generated signature with the received signature
   if (generatedSignature === signature) {
-    console.log("Payment verification successful");
-
     try {
-      // Step 1: Fetch the database order_id using razorpay_order_id
+      // Step 1: Fetch the installment number using razorpay_order_id
       const fetchSql =
-        "SELECT order_id FROM payment_tbl WHERE razorpay_order_id = ?";
+        "SELECT order_id, installment_number FROM payment_tbl WHERE razorpay_order_id = ?";
       const [rows] = await pool.promise().query(fetchSql, [razorpay_order_id]);
 
       if (rows.length === 0) {
@@ -1374,14 +1435,15 @@ app.post("/verify-payment", async (req, res) => {
       }
 
       const dbOrderId = rows[0].order_id;
+      const installmentNumber = rows[0].installment_number;
 
       // Step 2: Update the payment status and remaining amount in payment_tbl
       const updateSql = `
         UPDATE payment_tbl 
         SET payment_status = 'Completed', remaining_amount = 0 
-        WHERE order_id = ?
+        WHERE order_id = ? AND installment_number = ?
       `;
-      await pool.promise().query(updateSql, [dbOrderId]);
+      await pool.promise().query(updateSql, [dbOrderId, installmentNumber]);
 
       res.status(200).json({ message: "Payment verified successfully" });
     } catch (err) {
@@ -1390,6 +1452,60 @@ app.post("/verify-payment", async (req, res) => {
     }
   } else {
     res.status(400).json({ error: "Invalid signature" });
+  }
+});
+
+// Create Delivery
+app.post("/admin/delivery", async (req, res) => {
+  const { paymentId } = req.body;
+
+  try {
+    // Step 1: Fetch the order_id using paymentId
+    const fetchSql = "SELECT order_id FROM payment_tbl WHERE payment_id = ?";
+    const [rows] = await pool.promise().query(fetchSql, [paymentId]);
+
+    if (rows.length === 0) {
+      console.error("No matching payment found for payment ID");
+      return res.status(400).json({ error: "Payment not found" });
+    }
+
+    const orderId = rows[0].order_id;
+
+    // Step 2: Insert a new delivery record
+    const deliveryDate = new Date();
+    const status = "Pending"; // Default status for new deliveries
+
+    const insertSql = `
+      INSERT INTO delivery_tbl (order_id, delivery_date, status) 
+      VALUES (?, ?, ?)
+    `;
+    const [result] = await pool
+      .promise()
+      .query(insertSql, [orderId, deliveryDate, status]);
+
+    // Step 3: Return the created delivery details
+    res.status(201).json({
+      delivery_id: result.insertId,
+      order_id: orderId,
+      delivery_date: deliveryDate,
+      status: status,
+    });
+  } catch (err) {
+    console.error("Error creating delivery:", err);
+    res.status(500).json({ error: "Error creating delivery" });
+  }
+});
+
+// Get All Deliveries
+app.get("/admin/deliveries", async (req, res) => {
+  try {
+    const fetchSql = "SELECT * FROM delivery_tbl"; // Adjust the query as necessary
+    const [rows] = await pool.promise().query(fetchSql);
+
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Error fetching deliveries:", err);
+    res.status(500).json({ error: "Error fetching deliveries" });
   }
 });
 
