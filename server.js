@@ -735,11 +735,13 @@ app.get("/orders", verifyUser, async (req, res) => {
         o.order_id, o.order_status, o.order_date, 
         od.product_id, p.product_name, 
         od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
-        pm.payment_amount, pm.remaining_amount, pm.payment_status, pm.installment_number
+        pm.payment_amount, pm.payment_status, pm.installment_number,
+        d.delivery_status
       FROM order_tbl o
       JOIN order_details_tbl od ON o.order_id = od.order_id
       JOIN product_tbl p ON od.product_id = p.product_id
       LEFT JOIN payment_tbl pm ON o.order_id = pm.order_id
+      LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
       WHERE o.user_id = ?
       `,
       [req.user_id]
@@ -1476,7 +1478,7 @@ app.post("/admin/delivery", async (req, res) => {
     const status = "Pending"; // Default status for new deliveries
 
     const insertSql = `
-      INSERT INTO delivery_tbl (order_id, delivery_date, status) 
+      INSERT INTO delivery_tbl (order_id, delivery_date, delivery_status) 
       VALUES (?, ?, ?)
     `;
     const [result] = await pool
@@ -1499,13 +1501,45 @@ app.post("/admin/delivery", async (req, res) => {
 // Get All Deliveries
 app.get("/admin/deliveries", async (req, res) => {
   try {
-    const fetchSql = "SELECT * FROM delivery_tbl"; // Adjust the query as necessary
+    const fetchSql = `
+      SELECT 
+        d.delivery_id, 
+        d.order_id, 
+        d.delivery_status, 
+        d.delivery_date, 
+        p.payment_id, 
+        p.payment_status 
+      FROM 
+        delivery_tbl d
+      JOIN 
+        payment_tbl p ON d.order_id = p.order_id
+    `; // Adjust the query as necessary
     const [rows] = await pool.promise().query(fetchSql);
 
     res.status(200).json(rows);
   } catch (err) {
     console.error("Error fetching deliveries:", err);
     res.status(500).json({ error: "Error fetching deliveries" });
+  }
+});
+
+// Update Delivery Status
+app.put("/admin/delivery/:id", async (req, res) => {
+  const { id } = req.params;
+  const { delivery_status } = req.body;
+
+  try {
+    const updateSql = `
+      UPDATE delivery_tbl 
+      SET delivery_status = ? 
+      WHERE delivery_id = ?
+    `;
+    await pool.promise().query(updateSql, [delivery_status, id]);
+
+    res.status(200).json({ message: "Delivery status updated successfully." });
+  } catch (err) {
+    console.error("Error updating delivery status:", err);
+    res.status(500).json({ error: "Error updating delivery status" });
   }
 });
 
