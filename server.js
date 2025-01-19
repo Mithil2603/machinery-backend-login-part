@@ -8,9 +8,10 @@ import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
 import jwt, { decode } from "jsonwebtoken";
 import nodemailer from "nodemailer";
-import { ExpressValidator } from "express-validator";
+import multer from "multer";
 import crypto from "crypto";
 import Razorpay from "razorpay";
+import path from "path";
 
 const salt = 10;
 const app = express();
@@ -56,6 +57,18 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
 });
+
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/"); // Specify the directory to save uploaded files
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname)); // Append timestamp to the file name
+  },
+});
+
+const upload = multer({ storage: storage });
 
 // Route to handle sending inquiries
 app.post("/send-inquiry", async (req, res) => {
@@ -728,20 +741,23 @@ app.post("/place-order", verifyUser, async (req, res) => {
 
 app.get("/orders", verifyUser, async (req, res) => {
   try {
-    // Fetch orders along with product, order, and payment details
+    // Fetch orders along with product, order, payment, delivery, and service details
     const orders = await query(
       `
       SELECT 
-        o.order_id, o.order_status, o.order_date, 
-        od.product_id, p.product_name, 
-        od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
-        pm.payment_amount, pm.payment_status, pm.installment_number,
-        d.delivery_status
+      o.order_id, o.order_status, o.order_date, 
+      od.product_id, p.product_name, 
+      od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
+      pm.payment_amount, pm.payment_status, pm.installment_number, pm.payment_type, 
+      d.delivery_status, s.service_status,
+      u.first_name AS user_first_name, u.email AS user_email, u.phone_number AS user_phone_number
       FROM order_tbl o
       JOIN order_details_tbl od ON o.order_id = od.order_id
       JOIN product_tbl p ON od.product_id = p.product_id
       LEFT JOIN payment_tbl pm ON o.order_id = pm.order_id
       LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+      LEFT JOIN service_tbl s ON o.order_id = s.order_id
+      JOIN user_tbl u ON o.user_id = u.user_id
       WHERE o.user_id = ?
       `,
       [req.user_id]
@@ -1283,60 +1299,94 @@ app.get("/admin/payments", (req, res) => {
   });
 });
 
-app.post("/admin/payments", verifyUser, verifyAdmin, async (req, res) => {
-  const {
-    payment_amount,
-    payment_method,
-    payment_type,
-    order_id,
-    total_amount,
-    installment_number,
-  } = req.body;
+app.post(
+  "/admin/payments",
+  verifyUser,
+  verifyAdmin,
+  upload.single("billFile"),
+  async (req, res) => {
+    const {
+      payment_amount,
+      payment_method,
+      payment_type,
+      order_id,
+      total_amount,
+      installment_number,
+    } = JSON.parse(req.body.paymentDetails); // Parse the payment details from the request body
 
-  try {
-    // Validate required fields
-    if (
-      !payment_amount ||
-      !payment_method ||
-      !payment_type ||
-      !order_id ||
-      !installment_number
-    ) {
-      return res.status(400).json({ error: "Missing required fields." });
-    }
+    try {
+      // Validate required fields
+      if (
+        !payment_amount ||
+        !payment_method ||
+        !payment_type ||
+        !order_id ||
+        !installment_number
+      ) {
+        return res.status(400).json({ error: "Missing required fields." });
+      }
 
-    const paymentAmount = parseFloat(payment_amount);
-    const totalAmount = parseFloat(total_amount);
+      const paymentAmount = parseFloat(payment_amount);
+      const totalAmount = parseFloat(total_amount);
 
-    // Fetch the last installment details (if needed for any other logic)
-    const lastInstallmentSql =
-      "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
-    const [lastInstallmentRows] = await pool
-      .promise()
-      .query(lastInstallmentSql, [order_id, installment_number - 1]);
+      // Fetch the last installment details (if needed for any other logic)
+      const lastInstallmentSql =
+        "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
+      const [lastInstallmentRows] = await pool
+        .promise()
+        .query(lastInstallmentSql, [order_id, installment_number - 1]);
 
-    // Insert the new payment record
-    const sql = `
+      // Insert the new payment record
+      const sql = `
       INSERT INTO payment_tbl (
-        payment_amount, payment_method, installment_number, payment_type, total_amount, order_id
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, bill
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
-    await pool.promise().query(sql, [
-      paymentAmount,
-      payment_method,
-      installment_number,
-      payment_type,
-      totalAmount, // You can still keep total_amount if needed for the first installment
-      order_id,
-    ]);
+      // Save the file path to the database if a file was uploaded
+      const billFilePath = req.file ? req.file.path : null;
 
-    res.status(200).send("Payment created successfully.");
-  } catch (err) {
-    console.error("Error processing payment:", err);
-    res.status(500).send("Failed to process payment.");
+      await pool.promise().query(sql, [
+        paymentAmount,
+        payment_method,
+        installment_number,
+        payment_type,
+        totalAmount, // You can still keep total_amount if needed for the first installment
+        order_id,
+        billFilePath, // Save the file path to the database
+      ]);
+
+      res.status(200).send("Payment created successfully.");
+    } catch (err) {
+      console.error("Error processing payment:", err);
+      res.status(500).send("Failed to process payment.");
+    }
   }
-});
+);
+
+app.put(
+  "/admin/payments/:paymentId",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    const { paymentId } = req.params;
+    const { payment_status } = req.body;
+
+    try {
+      const sql = `
+      UPDATE payment_tbl 
+      SET payment_status = ? 
+      WHERE payment_id = ?
+    `;
+      await pool.promise().query(sql, [payment_status, paymentId]);
+
+      res.status(200).json({ message: "Payment status updated successfully." });
+    } catch (error) {
+      console.error("Error updating payment status:", error);
+      res.status(500).json({ error: "Failed to update payment status." });
+    }
+  }
+);
 
 app.post("/create-order", (req, res) => {
   const razorpay = new Razorpay({
@@ -1542,6 +1592,133 @@ app.put("/admin/delivery/:id", async (req, res) => {
     res.status(500).json({ error: "Error updating delivery status" });
   }
 });
+
+app.post("/request-service", verifyUser, async (req, res) => {
+  const { order_id, service_type, service_notes } = req.body;
+
+  try {
+    const sql = `
+      INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, requested_date)
+      VALUES (?, ?, ?, ?, NOW())
+    `;
+    await pool
+      .promise()
+      .query(sql, [order_id, req.user_id, service_type, service_notes]);
+
+    res
+      .status(200)
+      .json({ message: "Service request submitted successfully." });
+  } catch (error) {
+    console.error("Error processing service request:", error);
+    res.status(500).json({ error: "Failed to submit service request." });
+  }
+});
+
+app.put(
+  "/admin/services/:serviceId",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    const { serviceId } = req.params;
+    const { service_status } = req.body;
+
+    try {
+      const sql = `
+      UPDATE service_tbl 
+      SET service_status = ? 
+      WHERE service_id = ?
+    `;
+      await pool.promise().query(sql, [service_status, serviceId]);
+
+      res.status(200).json({ message: "Service status updated successfully." });
+    } catch (error) {
+      console.error("Error updating service status:", error);
+      res.status(500).json({ error: "Failed to update service status." });
+    }
+  }
+);
+
+app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        service_id, 
+        order_id, 
+        user_id, 
+        payment_id, 
+        requested_date, 
+        service_type, 
+        service_notes, 
+        service_cost, 
+        service_status 
+      FROM service_tbl
+    `;
+    const [rows] = await pool.promise().query(sql);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error("Error fetching services:", error);
+    res.status(500).json({ error: "Failed to fetch services." });
+  }
+});
+
+app.post(
+  "/admin/service-payments",
+  verifyUser,
+  verifyAdmin,
+  upload.single("billFile"), // If you want to allow bill uploads
+  async (req, res) => {
+    const { service_cost, payment_method, payment_type, order_id } = JSON.parse(
+      req.body.paymentDetails
+    ); // Parse the payment details from the request body
+
+    try {
+      // Validate required fields
+      if (!service_cost || !payment_method || !payment_type || !order_id) {
+        return res.status(400).json({ error: "Missing required fields." });
+      }
+
+      const paymentAmount = parseFloat(service_cost);
+
+      // Insert the new payment record
+      const paymentSql = `
+      INSERT INTO payment_tbl (
+        payment_amount, payment_method, payment_type, order_id, bill
+      ) VALUES (?, ?, ?, ?, ?)
+    `;
+
+      // Save the file path to the database if a file was uploaded
+      const billFilePath = req.file ? req.file.path : null;
+
+      // Create the payment record
+      const [paymentResult] = await pool.promise().query(paymentSql, [
+        paymentAmount,
+        payment_method,
+        payment_type,
+        order_id,
+        billFilePath, // Save the file path to the database
+      ]);
+
+      // Update the service_tbl to link the payment
+      const paymentId = paymentResult.insertId; // Get the ID of the newly created payment
+      const updateServiceSql = `
+        UPDATE service_tbl 
+        SET payment_id = ?, service_cost = ? 
+        WHERE order_id = ?
+      `;
+
+      await pool.promise().query(updateServiceSql, [
+        paymentId,
+        paymentAmount, // Update the service cost in the service_tbl
+        order_id,
+      ]);
+
+      res.status(200).send("Service payment created successfully.");
+    } catch (err) {
+      console.error("Error processing service payment:", err);
+      res.status(500).send("Failed to process service payment.");
+    }
+  }
+);
 
 app.listen(PORT, () => {
   console.log(`Server Started at ${PORT}`);
