@@ -1312,7 +1312,7 @@ app.post(
       order_id,
       total_amount,
       installment_number,
-    } = JSON.parse(req.body.paymentDetails); // Parse the payment details from the request body
+    } = req.body; // Parse the payment details from the request body
 
     try {
       // Validate required fields
@@ -1508,7 +1508,7 @@ app.post("/verify-payment", async (req, res) => {
 });
 
 // Create Delivery
-app.post("/admin/delivery", async (req, res) => {
+app.post("/admin/delivery", verifyUser, verifyAdmin, async (req, res) => {
   const { paymentId } = req.body;
 
   try {
@@ -1574,17 +1574,49 @@ app.get("/admin/deliveries", async (req, res) => {
 });
 
 // Update Delivery Status
-app.put("/admin/delivery/:id", async (req, res) => {
+app.put("/admin/delivery/:id", verifyUser, async (req, res) => {
   const { id } = req.params;
   const { delivery_status } = req.body;
 
   try {
+    // Update the delivery status
     const updateSql = `
       UPDATE delivery_tbl 
       SET delivery_status = ? 
       WHERE delivery_id = ?
     `;
     await pool.promise().query(updateSql, [delivery_status, id]);
+
+    // Check if the delivery status is 'Delivered'
+    if (delivery_status === "Delivered") {
+      // Fetch the order_id associated with this delivery
+      const orderSql = `
+        SELECT order_id 
+        FROM delivery_tbl 
+        WHERE delivery_id = ?
+      `;
+      const [orderRows] = await pool.promise().query(orderSql, [id]);
+
+      if (orderRows.length > 0) {
+        const orderId = orderRows[0].order_id;
+
+        // Insert a new record into the service_tbl
+        const serviceSql = `
+          INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, service_status) 
+          VALUES (?, ?, ?, ?, 'Pending')
+        `;
+
+        // Use the user_id from the request context
+        const userId = req.user_id; // This is set by your verifyUser  middleware
+        const serviceType = "Maintenance"; // Default service type, adjust as needed
+        const serviceNotes = ""; // You can also pass notes if needed
+
+        // Insert the service request into the service_tbl
+        await pool
+          .promise()
+          .query(serviceSql, [orderId, userId, serviceType, serviceNotes]);
+      }
+    }
 
     res.status(200).json({ message: "Delivery status updated successfully." });
   } catch (err) {
