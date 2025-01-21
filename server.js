@@ -137,6 +137,13 @@ app.get("/", verifyUser, (req, res) => {
 });
 
 app.post("/register", (req, res) => {
+  const requiredFields = ["first_name", "last_name", "email", "phone_number", "user_password"];
+  for (const field of requiredFields) {
+    if (!req.body[field]) {
+      return res.status(400).json({ Error: `${field.replace("_", " ")} is required.` });
+    }
+  }
+  
   const phoneNumberRegex = /^\+[1-9]\d{1,14}$/;
   const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
   const passwordRegex =
