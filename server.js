@@ -137,13 +137,21 @@ app.get("/", verifyUser, (req, res) => {
 });
 
 app.post("/register", (req, res) => {
-  const requiredFields = ["first_name", "last_name", "email", "phone_number", "user_password"];
+  const requiredFields = [
+    "first_name",
+    "last_name",
+    "email",
+    "phone_number",
+    "user_password",
+  ];
   for (const field of requiredFields) {
     if (!req.body[field]) {
-      return res.status(400).json({ Error: `${field.replace("_", " ")} is required.` });
+      return res
+        .status(400)
+        .json({ Error: `${field.replace("_", " ")} is required.` });
     }
   }
-  
+
   const phoneNumberRegex = /^\+[1-9]\d{1,14}$/;
   const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
   const passwordRegex =
@@ -375,34 +383,37 @@ app.post("/forgot-password", (req, res) => {
 });
 
 app.post("/reset-password", (req, res) => {
-  const { token, newPassword } = req.body;
+  const { email, user_password } = req.body;
 
-  const sql =
-    "SELECT user_id, reset_token_expiry FROM user_tbl WHERE reset_token = ?";
-  pool.query(sql, [token], (err, results) => {
-    if (err) return res.status(500).json({ Error: "Database error!" });
-    if (results.length === 0) {
-      return res.status(400).json({ Error: "Invalid or expired token!" });
+  // Check if the user exists
+  const sql = "SELECT * FROM user_tbl WHERE email = ?";
+  pool.query(sql, [email], (err, data) => {
+    if (err) {
+      return res.json({ Error: "Error accessing the server!" });
     }
+    if (data.length > 0) {
+      // Hash the new password
+      bcrypt.hash(user_password, 10, (err, hash) => {
+        if (err) {
+          return res.json({ Error: "Error hashing password!" });
+        }
 
-    const expiryTime = results[0].reset_token_expiry;
-    if (new Date() > expiryTime) {
-      return res.status(400).json({ Error: "Token has expired!" });
-    }
-
-    // Update password
-    bcrypt.hash(newPassword, salt, (err, hashedPassword) => {
-      if (err) return res.status(500).json({ Error: "Hashing error!" });
-
-      const updateSql =
-        "UPDATE user_tbl SET user_password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE reset_token = ?";
-      pool.query(updateSql, [hashedPassword, token], (err, result) => {
-        if (err)
-          return res.status(500).json({ Error: "Database update error!" });
-
-        res.json({ status: "Success", message: "Password has been reset!" });
+        // Update the user's password
+        const updateSql =
+          "UPDATE user_tbl SET user_password = ? WHERE email = ?";
+        pool.query(updateSql, [hash, email], (err, result) => {
+          if (err) {
+            return res.json({ Error: "Error updating password!" });
+          }
+          return res.json({
+            status: "Success",
+            message: "Password reset successfully!",
+          });
+        });
       });
-    });
+    } else {
+      return res.json({ message: "Email not found!" });
+    }
   });
 });
 
