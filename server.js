@@ -1113,19 +1113,30 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
   const user_id = req.user_id;
 
   try {
-    // Parse the product description input (admin enters like: ["RTR, RTF", "Hi, Hello"])
+    // Ensure product_description is a valid JSON string
     let parsedDescription = [];
-    try {
-      parsedDescription = JSON.parse(product_description); // Parsing the input JSON string
-      if (!Array.isArray(parsedDescription)) {
-        return res.status(400).json({
-          message: "Invalid JSON array format for product description.",
-        });
+    if (typeof product_description === "string") {
+      try {
+        parsedDescription = JSON.parse(product_description); // Parsing the input JSON string
+        if (!Array.isArray(parsedDescription)) {
+          return res.status(400).json({
+            message: "Invalid JSON array format for product description.",
+          });
+        }
+      } catch (error) {
+        return res
+          .status(400)
+          .json({ message: "Invalid JSON format for product description." });
       }
-    } catch (error) {
+    } else if (Array.isArray(product_description)) {
+      parsedDescription = product_description; // If it's already an array, use it directly
+    } else {
       return res
         .status(400)
-        .json({ message: "Invalid JSON format for product description." });
+        .json({
+          message:
+            "Product description must be an array or a valid JSON string.",
+        });
     }
 
     const productDescriptionJson = JSON.stringify(parsedDescription); // Store as JSON string
