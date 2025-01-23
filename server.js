@@ -533,8 +533,8 @@ app.post("/categories", verifyUser, verifyAdmin, async (req, res) => {
 });
 
 // Retrieve all products (Public Access)
-app.get("/products", (req, res) => {
-  const sql = "SELECT * FROM product_tbl";
+app.get("/products/all", (req, res) => {
+  const sql = "SELECT * FROM product_tbl WHERE deleted = 0";
   pool.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.status(200).json(results);
@@ -985,15 +985,37 @@ app.put("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
 // Delete a category
 app.delete("/categories/:id", verifyUser, verifyAdmin, async (req, res) => {
   const { id } = req.params;
+
   try {
+    // Check if there are any products in the category
     pool.query(
-      "DELETE FROM category_tbl WHERE category_id = ?",
+      "SELECT COUNT(*) AS productCount FROM product_tbl WHERE category_id = ?",
       [id],
       (error, results) => {
         if (error) {
           throw error;
         }
-        res.status(200).json({ message: "Category deleted successfully." });
+
+        const productCount = results[0].productCount;
+        if (productCount > 0) {
+          // Prevent deletion if products are present
+          return res.status(400).json({
+            message:
+              "Cannot delete category with products. Remove associated products first.",
+          });
+        }
+
+        // Proceed to delete the category
+        pool.query(
+          "DELETE FROM category_tbl WHERE category_id = ?",
+          [id],
+          (deleteError, deleteResults) => {
+            if (deleteError) {
+              throw deleteError;
+            }
+            res.status(200).json({ message: "Category deleted successfully." });
+          }
+        );
       }
     );
   } catch (error) {
@@ -1019,18 +1041,18 @@ app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
         created_at, 
         update_at 
       FROM product_tbl
+      WHERE deleted = 0 
     `;
     const params = [];
 
     // Add filters
     if (category_id) {
-      query += " WHERE category_id = ?";
+      query += " AND category_id = ?";
       params.push(category_id);
     }
 
     if (product_name) {
-      query += params.length ? " AND" : " WHERE";
-      query += " product_name LIKE ?";
+      query += " AND product_name LIKE ?";
       params.push(`%${product_name}%`);
     }
 
@@ -1039,20 +1061,21 @@ app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
 
     pool.query(query, params, (error, results) => {
       if (error) {
-        throw error;
+        console.error("Database query error:", error);
+        return res.status(500).json({ message: "Database query error." });
       }
-
-      // Parse JSON fields for response
+      
+      // No need to parse product_description and product_img
       const parsedResults = results.map((result) => ({
         ...result,
-        product_description: JSON.parse(result.product_description || "[]"),
-        product_img: JSON.parse(result.product_img || "[]"),
+        product_description: result.product_description || [], // Use as is
+        product_img: result.product_img || [], // Use as is
       }));
 
       res.status(200).json(parsedResults);
     });
   } catch (error) {
-    console.error(error);
+    console.error("Unexpected error:", error);
     res.status(500).json({ message: "Failed to fetch products." });
   }
 });
@@ -1131,12 +1154,9 @@ app.put("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
     } else if (Array.isArray(product_description)) {
       parsedDescription = product_description; // If it's already an array, use it directly
     } else {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Product description must be an array or a valid JSON string.",
-        });
+      return res.status(400).json({
+        message: "Product description must be an array or a valid JSON string.",
+      });
     }
 
     const productDescriptionJson = JSON.stringify(parsedDescription); // Store as JSON string
@@ -1195,6 +1215,55 @@ app.delete("/products/:id", verifyUser, verifyAdmin, async (req, res) => {
     res.status(500).json({ message: "Failed to delete product." });
   }
 });
+
+// Soft delete endpoint
+app.put(
+  "/products/:id/soft-delete",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    const { id } = req.params;
+    try {
+      // Check if there are any orders associated with this product
+      pool.query(
+        "SELECT COUNT(*) AS orderCount FROM order_details_tbl WHERE product_id = ?",
+        [id],
+        (error, results) => {
+          if (error) {
+            throw error;
+          }
+
+          const orderCount = results[0].orderCount;
+
+          if (orderCount > 0) {
+            return res.status(400).json({
+              message:
+                "Cannot delete product. There are orders associated with it.",
+            });
+          }
+
+          // Proceed with soft delete
+          pool.query(
+            "UPDATE product_tbl SET deleted = 1 WHERE product_id = ?",
+            [id],
+            (error, results) => {
+              if (error) {
+                throw error;
+              }
+              console.log(`Product ${id} soft deleted successfully.`); // Log the soft delete
+              res
+                .status(200)
+                .json({ message: "Product soft deleted successfully." });
+            }
+          );
+        }
+      );
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to soft delete product." });
+    }
+  }
+);
 
 // Get all orders with details
 app.get("/admin/orders", verifyUser, verifyAdmin, async (req, res) => {
