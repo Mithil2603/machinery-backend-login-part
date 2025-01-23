@@ -31,10 +31,11 @@ app.use(cookieParser());
 
 // Create a connection pool
 const pool = mysql.createPool({
-  host: process.env.HOST,
-  user: process.env.USER,
-  password: process.env.PASSWORD,
-  database: process.env.DATABASE,
+  host: process.env.HOST || process.env.MYSQL_HOST, // Use the HOST variable or MYSQL_HOST
+  user: process.env.USER || process.env.MYSQL_USER, // Use the USER variable or MYSQL_USER
+  password: process.env.PASSWORD || process.env.MYSQL_PASSWORD, // Use the PASSWORD variable or MYSQL_PASSWORD
+  database: process.env.DATABASE || process.env.MYSQL_DATABASE, // Use the DATABASE variable or MYSQL_DATABASE
+  port: process.env.PORT || process.env.MYSQL_PORT,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
