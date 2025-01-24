@@ -1,0 +1,37 @@
+[33m43511bc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m seeing
+[33mb00d164[m new link added
+[33m0527d69[m soft delete added
+[33mcf4387b[m product edit done
+[33mcc2e3ff[m password-reset route added
+[33m7c17e2f[m minor change
+[33mf7f9cbb[m few issues solved
+[33mab0ef03[m service code added and some updation in orders
+[33mb9aff2a[m Dynamic values in Orders
+[33md79c2b8[m installments done
+[33m28b5cc9[m get route for payments added
+[33m4f592a5[m finally razorpay worked
+[33md2455b0[m order has now payment, but not working
+[33m338e4e7[m feedbacks added
+[33m281f769[m json problem
+[33m167dde9[m manage orders done
+[33m325aaa5[m Manage Products added
+[33mcafd3af[m bugs fixed
+[33m55596cc[m manage category code added
+[33m26ade6d[m manage user route created
+[33m383d2c2[m admin dashboard components created
+[33md41666f[m order page populated
+[33m49557cf[m admin page authorized
+[33m245a435[m reset password and email verification added
+[33ma975c32[m from validation added
+[33mee9062e[m inquiry route added
+[33ma50c3e7[m category route added
+[33m763b82c[m machinery routes added
+[33m88f19e5[m order placing is done
+[33m572bd6c[m update profile route added
+[33m3089d4c[m protected routes are not accessible from url
+[33m81817fc[m minor change
+[33m4617ecb[m logout and profile routes added
+[33mc0ce275[m token verification added
+[33m76af828[m token with cookie added
+[33me9671e4[m login route added
+[33mbf4c93f[m first commit
