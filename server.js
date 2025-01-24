@@ -1,4 +1,4 @@
-import dotenv, { config } from "dotenv";
+import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
 import bodyParser from "body-parser";
@@ -22,7 +22,11 @@ app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: ["http://localhost:3001", "http://localhost:3000", "https://radheenterprise.netlify.app"],
+    origin: [
+      "http://localhost:3001",
+      "http://localhost:3000",
+      "https://radheenterprise.netlify.app",
+    ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
@@ -31,20 +35,29 @@ app.use(cookieParser());
 
 // Create a connection pool
 const pool = mysql.createPool({
-  host: process.env.HOST, 
-  user: process.env.USER, 
-  password: process.env.PASSWORD, 
-  database: process.env.DATABASE, 
+  host: process.env.HOST,
+  user: process.env.USER,
+  password: process.env.PASSWORD,
+  database: process.env.DATABASE,
   port: process.env.PORT,
   waitForConnections: true,
-  connectionLimit: 10,
   queueLimit: 0,
 });
 
 // Connect to the database
 pool.getConnection((err, connection) => {
   if (err) {
-    console.error("Database connection failed:", err.message);
+    if (err.code === "ETIMEDOUT") {
+      console.error(
+        "Database connection timed out. Check your network or server status."
+      );
+    } else if (err.code === "ECONNREFUSED") {
+      console.error(
+        "Database connection was refused. Check your credentials or database status."
+      );
+    } else {
+      console.error("Database connection failed:", err.message);
+    }
   } else {
     console.log("Connected to the MySQL database.");
     connection.release(); // Release the connection back to the pool
@@ -1065,7 +1078,7 @@ app.get("/products", verifyUser, verifyAdmin, async (req, res) => {
         console.error("Database query error:", error);
         return res.status(500).json({ message: "Database query error." });
       }
-      
+
       // No need to parse product_description and product_img
       const parsedResults = results.map((result) => ({
         ...result,
