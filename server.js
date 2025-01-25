@@ -15,7 +15,7 @@ import path from "path";
 
 const salt = 10;
 const app = express();
-const PORT = process.env.PORT;
+const PORT = 8000;
 
 app.use(express.json());
 app.use(bodyParser.json());
@@ -780,7 +780,7 @@ app.get("/orders", verifyUser, async (req, res) => {
       o.order_id, o.order_status, o.order_date, 
       od.product_id, p.product_name, 
       od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length, 
-      pm.payment_amount, pm.payment_status, pm.installment_number, pm.payment_type, 
+      pm.payment_amount, pm.payment_status, pm.installment_number, pm.payment_type, pm.payment_method, 
       d.delivery_status, s.service_status,
       u.first_name AS user_first_name, u.email AS user_email, u.phone_number AS user_phone_number
       FROM order_tbl o
@@ -1411,12 +1411,85 @@ app.get("/admin/payments", (req, res) => {
   });
 });
 
+// app.post(
+//   "/admin/payments",
+//   verifyUser,
+//   verifyAdmin,
+//   upload.single("billFile"),
+//   async (req, res) => {
+//     const {
+//       payment_amount,
+//       payment_method,
+//       payment_type,
+//       order_id,
+//       total_amount,
+//       installment_number,
+//     } = req.body; // Parse the payment details from the request body
+
+//     try {
+//       // Validate required fields
+//       if (
+//         !payment_amount ||
+//         !payment_method ||
+//         !payment_type ||
+//         !order_id ||
+//         !installment_number
+//       ) {
+//         return res.status(400).json({ error: "Missing required fields." });
+//       }
+
+//       const paymentAmount = parseFloat(payment_amount);
+//       const totalAmount = parseFloat(total_amount);
+
+//       // Fetch the last installment details (if needed for any other logic)
+//       const lastInstallmentSql =
+//         "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
+//       const [lastInstallmentRows] = await pool
+//         .promise()
+//         .query(lastInstallmentSql, [order_id, installment_number - 1]);
+
+//       // Insert the new payment record
+//       const sql = `
+//       INSERT INTO payment_tbl (
+//         payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, bill
+//       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+//     `;
+
+//       // Save the file path to the database if a file was uploaded
+//       const billFilePath = req.file ? req.file.path : null;
+
+//       await pool.promise().query(sql, [
+//         paymentAmount,
+//         payment_method,
+//         installment_number,
+//         payment_type,
+//         totalAmount, // You can still keep total_amount if needed for the first installment
+//         order_id,
+//         billFilePath, // Save the file path to the database
+//       ]);
+
+//       res.status(200).send("Payment created successfully.");
+//     } catch (err) {
+//       console.error("Error processing payment:", err);
+//       res.status(500).send("Failed to process payment.");
+//     }
+//   }
+// );
+
 app.post(
   "/admin/payments",
-  verifyUser,
+  verifyUser ,
   verifyAdmin,
   upload.single("billFile"),
   async (req, res) => {
+    // Parse the payment details from the request body
+    let paymentDetails;
+    try {
+      paymentDetails = JSON.parse(req.body.paymentDetails);
+    } catch (error) {
+      return res.status(400).json({ error: "Invalid payment details format." });
+    }
+
     const {
       payment_amount,
       payment_method,
@@ -1424,7 +1497,7 @@ app.post(
       order_id,
       total_amount,
       installment_number,
-    } = req.body; // Parse the payment details from the request body
+    } = paymentDetails; // Destructure payment details
 
     try {
       // Validate required fields
@@ -1699,36 +1772,36 @@ app.put("/admin/delivery/:id", verifyUser, async (req, res) => {
     `;
     await pool.promise().query(updateSql, [delivery_status, id]);
 
-    // Check if the delivery status is 'Delivered'
-    if (delivery_status === "Delivered") {
-      // Fetch the order_id associated with this delivery
-      const orderSql = `
-        SELECT order_id 
-        FROM delivery_tbl 
-        WHERE delivery_id = ?
-      `;
-      const [orderRows] = await pool.promise().query(orderSql, [id]);
+    // // Check if the delivery status is 'Delivered'
+    // if (delivery_status === "Delivered") {
+    //   // Fetch the order_id associated with this delivery
+    //   const orderSql = `
+    //     SELECT order_id 
+    //     FROM delivery_tbl 
+    //     WHERE delivery_id = ?
+    //   `;
+    //   const [orderRows] = await pool.promise().query(orderSql, [id]);
 
-      if (orderRows.length > 0) {
-        const orderId = orderRows[0].order_id;
+    //   if (orderRows.length > 0) {
+    //     const orderId = orderRows[0].order_id;
 
-        // Insert a new record into the service_tbl
-        const serviceSql = `
-          INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, service_status) 
-          VALUES (?, ?, ?, ?, 'Pending')
-        `;
+    //     // Insert a new record into the service_tbl
+    //     const serviceSql = `
+    //       INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, service_status) 
+    //       VALUES (?, ?, ?, ?, 'Pending')
+    //     `;
 
-        // Use the user_id from the request context
-        const userId = req.user_id; // This is set by your verifyUser  middleware
-        const serviceType = "Maintenance"; // Default service type, adjust as needed
-        const serviceNotes = ""; // You can also pass notes if needed
+    //     // Use the user_id from the request context
+    //     const userId = req.user_id; // This is set by your verifyUser  middleware
+    //     const serviceType = "Maintenance"; // Default service type, adjust as needed
+    //     const serviceNotes = ""; // You can also pass notes if needed
 
-        // Insert the service request into the service_tbl
-        await pool
-          .promise()
-          .query(serviceSql, [orderId, userId, serviceType, serviceNotes]);
-      }
-    }
+    //     // Insert the service request into the service_tbl
+    //     await pool
+    //       .promise()
+    //       .query(serviceSql, [orderId, userId, serviceType, serviceNotes]);
+    //   }
+    // }
 
     res.status(200).json({ message: "Delivery status updated successfully." });
   } catch (err) {
@@ -1786,16 +1859,18 @@ app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
   try {
     const sql = `
       SELECT 
-        service_id, 
-        order_id, 
-        user_id, 
-        payment_id, 
-        requested_date, 
-        service_type, 
-        service_notes, 
-        service_cost, 
-        service_status 
-      FROM service_tbl
+        s.service_id, 
+        s.order_id, 
+        s.user_id, 
+        s.payment_id, 
+        s.requested_date, 
+        s.service_type, 
+        s.service_notes, 
+        s.service_cost, 
+        s.service_status,
+        p.payment_status  -- Fetching payment_status from payment_tbl
+      FROM service_tbl s
+      LEFT JOIN payment_tbl p ON s.payment_id = p.payment_id  -- Joining with payment_tbl
     `;
     const [rows] = await pool.promise().query(sql);
     res.status(200).json(rows);
