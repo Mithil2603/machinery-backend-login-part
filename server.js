@@ -508,7 +508,7 @@ app.get("/categories", (req, res) => {
 app.get("/products/category/:categoryId", (req, res) => {
   const { categoryId } = req.params;
 
-  const sql = "SELECT * FROM product_tbl WHERE category_id = ?";
+  const sql = "SELECT * FROM product_tbl WHERE category_id = ? AND deleted = 0 ";
   pool.query(sql, [categoryId], (err, results) => {
     if (err) {
       console.error("Error fetching products by category:", err);
@@ -1411,143 +1411,73 @@ app.get("/admin/payments", (req, res) => {
   });
 });
 
-// app.post(
-//   "/admin/payments",
-//   verifyUser,
-//   verifyAdmin,
-//   upload.single("billFile"),
-//   async (req, res) => {
-//     const {
-//       payment_amount,
-//       payment_method,
-//       payment_type,
-//       order_id,
-//       total_amount,
-//       installment_number,
-//     } = req.body; // Parse the payment details from the request body
+app.post("/admin/payments", verifyUser, verifyAdmin, upload.single("billFile"), async (req, res) => {
+  console.log("Request body:", req.body);  // Check if all fields are coming through correctly
 
-//     try {
-//       // Validate required fields
-//       if (
-//         !payment_amount ||
-//         !payment_method ||
-//         !payment_type ||
-//         !order_id ||
-//         !installment_number
-//       ) {
-//         return res.status(400).json({ error: "Missing required fields." });
-//       }
+  const {
+    payment_amount,
+    payment_method,
+    payment_type,
+    order_id,
+    total_amount,
+    installment_number,
+  } = req.body; // Destructure payment details
 
-//       const paymentAmount = parseFloat(payment_amount);
-//       const totalAmount = parseFloat(total_amount);
+  console.log("Parsed payment details:", {
+    payment_amount,
+    payment_method,
+    payment_type,
+    order_id,
+    total_amount,
+    installment_number,
+  });
 
-//       // Fetch the last installment details (if needed for any other logic)
-//       const lastInstallmentSql =
-//         "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
-//       const [lastInstallmentRows] = await pool
-//         .promise()
-//         .query(lastInstallmentSql, [order_id, installment_number - 1]);
-
-//       // Insert the new payment record
-//       const sql = `
-//       INSERT INTO payment_tbl (
-//         payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, bill
-//       ) VALUES (?, ?, ?, ?, ?, ?, ?)
-//     `;
-
-//       // Save the file path to the database if a file was uploaded
-//       const billFilePath = req.file ? req.file.path : null;
-
-//       await pool.promise().query(sql, [
-//         paymentAmount,
-//         payment_method,
-//         installment_number,
-//         payment_type,
-//         totalAmount, // You can still keep total_amount if needed for the first installment
-//         order_id,
-//         billFilePath, // Save the file path to the database
-//       ]);
-
-//       res.status(200).send("Payment created successfully.");
-//     } catch (err) {
-//       console.error("Error processing payment:", err);
-//       res.status(500).send("Failed to process payment.");
-//     }
-//   }
-// );
-
-app.post(
-  "/admin/payments",
-  verifyUser ,
-  verifyAdmin,
-  upload.single("billFile"),
-  async (req, res) => {
-    // Parse the payment details from the request body
-    let paymentDetails;
-    try {
-      paymentDetails = JSON.parse(req.body.paymentDetails);
-    } catch (error) {
-      return res.status(400).json({ error: "Invalid payment details format." });
+  try {
+    // Validate required fields
+    if (
+      !payment_amount ||
+      !payment_method ||
+      !payment_type ||
+      !order_id ||
+      !installment_number
+    ) {
+      return res.status(400).json({ error: "Missing required fields." });
     }
 
-    const {
-      payment_amount,
-      payment_method,
-      payment_type,
-      order_id,
-      total_amount,
-      installment_number,
-    } = paymentDetails; // Destructure payment details
+    // Convert installment_number to string to match ENUM type
+    const installmentNumber = String(installment_number);
 
-    try {
-      // Validate required fields
-      if (
-        !payment_amount ||
-        !payment_method ||
-        !payment_type ||
-        !order_id ||
-        !installment_number
-      ) {
-        return res.status(400).json({ error: "Missing required fields." });
-      }
+    console.log("Installment number:", installmentNumber);
 
-      const paymentAmount = parseFloat(payment_amount);
-      const totalAmount = parseFloat(total_amount);
+    const paymentAmount = parseFloat(payment_amount);
+    const totalAmount = parseFloat(total_amount);
 
-      // Fetch the last installment details (if needed for any other logic)
-      const lastInstallmentSql =
-        "SELECT * FROM payment_tbl WHERE order_id = ? AND installment_number = ?";
-      const [lastInstallmentRows] = await pool
-        .promise()
-        .query(lastInstallmentSql, [order_id, installment_number - 1]);
-
-      // Insert the new payment record
-      const sql = `
+    // Insert payment details
+    const sql = `
       INSERT INTO payment_tbl (
         payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, bill
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
-      // Save the file path to the database if a file was uploaded
-      const billFilePath = req.file ? req.file.path : null;
+    // Save the file path to the database if a file was uploaded
+    const billFilePath = req.file ? req.file.path : null;
 
-      await pool.promise().query(sql, [
-        paymentAmount,
-        payment_method,
-        installment_number,
-        payment_type,
-        totalAmount, // You can still keep total_amount if needed for the first installment
-        order_id,
-        billFilePath, // Save the file path to the database
-      ]);
+    await pool.promise().query(sql, [
+      paymentAmount,
+      payment_method,
+      installmentNumber, // Use the string value
+      payment_type,
+      totalAmount,
+      order_id,
+      billFilePath,
+    ]);
 
-      res.status(200).send("Payment created successfully.");
-    } catch (err) {
-      console.error("Error processing payment:", err);
-      res.status(500).send("Failed to process payment.");
-    }
+    res.status(200).send("Payment created successfully.");
+  } catch (err) {
+    console.error("Error processing payment:", err);
+    res.status(500).send("Failed to process payment.");
   }
-);
+});
 
 app.put(
   "/admin/payments/:paymentId",
@@ -1776,8 +1706,8 @@ app.put("/admin/delivery/:id", verifyUser, async (req, res) => {
     // if (delivery_status === "Delivered") {
     //   // Fetch the order_id associated with this delivery
     //   const orderSql = `
-    //     SELECT order_id 
-    //     FROM delivery_tbl 
+    //     SELECT order_id
+    //     FROM delivery_tbl
     //     WHERE delivery_id = ?
     //   `;
     //   const [orderRows] = await pool.promise().query(orderSql, [id]);
@@ -1787,7 +1717,7 @@ app.put("/admin/delivery/:id", verifyUser, async (req, res) => {
 
     //     // Insert a new record into the service_tbl
     //     const serviceSql = `
-    //       INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, service_status) 
+    //       INSERT INTO service_tbl (order_id, user_id, service_type, service_notes, service_status)
     //       VALUES (?, ?, ?, ?, 'Pending')
     //     `;
 
