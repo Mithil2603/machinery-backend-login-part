@@ -320,7 +320,7 @@ app.post("/login", (req, res) => {
             res.cookie("token", token);
             return res.json({ status: "Success", user_type });
           } else {
-            return res.json({ message: "Password does not match!" });
+            return res.json({ message: "Invalid Email or Password!" });
           }
         }
       );
