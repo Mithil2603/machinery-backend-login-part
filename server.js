@@ -203,7 +203,7 @@ app.post("/register", (req, res) => {
     }
 
     // Proceed with hashing the password and inserting into temp_user_tbl
-    bcrypt.hash(req.body.user_password.toString(), saltRounds, (err, hash) => {
+    bcrypt.hash(req.body.user_password.toString(), salt, (err, hash) => {
       if (err) {
         console.error("Hashing Error:", err);
         return res.json({ Error: "Error while hashing password!" });
