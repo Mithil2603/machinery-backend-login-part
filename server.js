@@ -6,7 +6,7 @@ import mysql from "mysql2";
 import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
-import jwt, { decode } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import multer from "multer";
 import crypto from "crypto";
