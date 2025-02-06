@@ -199,7 +199,7 @@ app.post("/register", (req, res) => {
     });
 
     const sql =
-      "INSERT INTO user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, user_type, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      "INSERT INTO temp_user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, user_type, email_verified, otp, otp_expiration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     const values = [
       req.body.first_name,
       req.body.last_name,
@@ -215,6 +215,8 @@ app.post("/register", (req, res) => {
       hash,
       "customer",
       false,
+      null,
+      null,
     ];
 
     pool.query(sql, values, (err, result) => {
@@ -228,69 +230,158 @@ app.post("/register", (req, res) => {
         return res.json({ Error: "Error inserting data in server" });
       }
 
-      const verificationLink = `${process.env.HOST_IP}/verify-email?token=${token}`;
+      // Generate OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+      const otpExpiration = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
 
-      // Send email
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: req.body.email,
-        subject: "Verify Your Email",
-        html: `<p>Please verify your email by clicking the link below:</p>
-               <a href="${verificationLink}">${verificationLink}</a>`,
-      };
+      // Update the user with OTP and expiration
+      const updateSql =
+        "UPDATE temp_user_tbl SET otp = ?, otp_expiration = ? WHERE email = ?";
+      const updateValues = [otp, otpExpiration, req.body.email];
 
-      transporter.sendMail(mailOptions, (err, info) => {
+      pool.query(updateSql, updateValues, (err) => {
         if (err) {
-          console.error("Email Sending Error:", err);
-          return res.json({ Error: "Error sending verification email" });
+          console.error("SQL Error:", err);
+          return res.json({ Error: "Error updating OTP in server" });
         }
 
-        return res.json({
-          status: "Success",
-          message: "User registered successfully. Please verify your email.",
+        // Send OTP email
+        const mailOptions = {
+          from: process.env.EMAIL_USER,
+          to: req.body.email,
+          subject: "Your OTP Code",
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #39749f; border-radius: 5px;">
+              <h2 style="color: #ffffff;">Welcome to Our Service!</h2>
+              <p style="color: #ffffff;">Thank you for registering. Please use the following One-Time Password (OTP) to complete your registration:</p>
+              <h1 style="font-size: 36px; color: #4CAF50; text-align: center; padding: 10px; border: 2px solid #4CAF50; border-radius: 5px; display: inline-block;">
+                ${otp}
+              </h1>
+              <p style="color: #ffffff;">This OTP is valid for <strong>10 minutes</strong>.</p>
+              <p style="color: #ffffff;">If you did not request this, please ignore this email.</p>
+              <footer style="margin-top: 20px; font-size: 12px; color: #ffffff;">
+                <p>Thank you for choosing us!</p>
+                <p>Best Regards,<br>Radhe Enterprise Pvt. Ptd.</p>
+              </footer>
+            </div>
+          `,
+        };
+
+        transporter.sendMail(mailOptions, (err) => {
+          if (err) {
+            console.error("Email Sending Error:", err);
+            return res.json({ Error: "Error sending OTP email" });
+          }
+
+          return res.json({
+            status: "Success",
+            message:
+              "Please check your email for the OTP.",
+          });
         });
       });
     });
   });
 });
 
-// Email verification endpoint
-app.get("/verify-email", (req, res) => {
-  const { token } = req.query;
+// OTP verification endpoint
+app.post("/verify-otp", (req, res) => {
+  const { email, otp } = req.body;
 
-  if (!token) {
-    return res.status(400).json({ Error: "Verification token is required" });
+  if (!email || !otp) {
+    return res.status(400).json({ Error: "Email and OTP are required." });
   }
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const sql = "UPDATE user_tbl SET email_verified = ? WHERE email = ?";
-    const values = [true, decoded.email];
+  const sql =
+    "SELECT otp, otp_expiration, user_password FROM temp_user_tbl WHERE email = ?";
+  pool.query(sql, [email], (err, results) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res
+        .status(500)
+        .json({ Error: "Database error during OTP verification" });
+    }
 
-    pool.query(sql, values, (err, result) => {
-      if (err) {
-        console.error("SQL Error:", err);
-        return res
-          .status(500)
-          .json({ Error: "Database error during verification" });
-      }
+    if (results.length === 0) {
+      return res.status(404).json({ Error: "User  not found." });
+    }
 
-      if (result.affectedRows === 0) {
-        return res
-          .status(404)
-          .json({ Error: "User not found or already verified" });
-      }
+    const { otp: storedOtp, otp_expiration, user_password } = results[0];
 
-      return res.json({
-        status: "Success",
-        message: "Email verified successfully",
+    // Check if OTP is valid and not expired
+    if (storedOtp === otp && new Date() < new Date(otp_expiration)) {
+      // Move user data from temp_user_tbl to user_tbl
+      const insertSql =
+        "INSERT INTO user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, user_type, email_verified) SELECT first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, ?, 'customer', true FROM temp_user_tbl WHERE email = ?";
+      const insertValues = [user_password, email];
+
+      pool.query(insertSql, insertValues, (err) => {
+        if (err) {
+          console.error("SQL Error:", err);
+          return res
+            .status(500)
+            .json({ Error: "Error inserting data into user_tbl" });
+        }
+
+        // Delete the user from temp_user_tbl
+        const deleteSql = "DELETE FROM temp_user_tbl WHERE email = ?";
+        pool.query(deleteSql, [email], (err) => {
+          if (err) {
+            console.error("SQL Error:", err);
+            return res
+              .status(500)
+              .json({ Error: "Error deleting temporary user" });
+          }
+
+          return res.json({
+            status: "Success",
+            message:
+              "OTP verified successfully. Your registration is complete.",
+          });
+        });
       });
-    });
-  } catch (err) {
-    console.error("JWT Error:", err);
-    return res.status(400).json({ Error: "Invalid or expired token" });
-  }
+    } else {
+      return res.status(400).json({ Error: "Invalid or expired OTP." });
+    }
+  });
 });
+
+// app.get("/verify-email", (req, res) => {
+//   const { token } = req.query;
+
+//   if (!token) {
+//     return res.status(400).json({ Error: "Verification token is required" });
+//   }
+
+//   try {
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     const sql = "UPDATE user_tbl SET email_verified = ? WHERE email = ?";
+//     const values = [true, decoded.email];
+
+//     pool.query(sql, values, (err, result) => {
+//       if (err) {
+//         console.error("SQL Error:", err);
+//         return res
+//           .status(500)
+//           .json({ Error: "Database error during verification" });
+//       }
+
+//       if (result.affectedRows === 0) {
+//         return res
+//           .status(404)
+//           .json({ Error: "User not found or already verified" });
+//       }
+
+//       return res.json({
+//         status: "Success",
+//         message: "Email verified successfully",
+//       });
+//     });
+//   } catch (err) {
+//     console.error("JWT Error:", err);
+//     return res.status(400).json({ Error: "Invalid or expired token" });
+//   }
+// });
 
 app.post("/login", (req, res) => {
   const sql = "SELECT * FROM user_tbl WHERE email = ?";
@@ -508,7 +599,8 @@ app.get("/categories", (req, res) => {
 app.get("/products/category/:categoryId", (req, res) => {
   const { categoryId } = req.params;
 
-  const sql = "SELECT * FROM product_tbl WHERE category_id = ? AND deleted = 0 ";
+  const sql =
+    "SELECT * FROM product_tbl WHERE category_id = ? AND deleted = 0 ";
   pool.query(sql, [categoryId], (err, results) => {
     if (err) {
       console.error("Error fetching products by category:", err);
@@ -1411,73 +1503,79 @@ app.get("/admin/payments", (req, res) => {
   });
 });
 
-app.post("/admin/payments", verifyUser, verifyAdmin, upload.single("billFile"), async (req, res) => {
-  console.log("Request body:", req.body);  // Check if all fields are coming through correctly
+app.post(
+  "/admin/payments",
+  verifyUser,
+  verifyAdmin,
+  upload.single("billFile"),
+  async (req, res) => {
+    console.log("Request body:", req.body); // Check if all fields are coming through correctly
 
-  const {
-    payment_amount,
-    payment_method,
-    payment_type,
-    order_id,
-    total_amount,
-    installment_number,
-  } = req.body; // Destructure payment details
+    const {
+      payment_amount,
+      payment_method,
+      payment_type,
+      order_id,
+      total_amount,
+      installment_number,
+    } = req.body; // Destructure payment details
 
-  console.log("Parsed payment details:", {
-    payment_amount,
-    payment_method,
-    payment_type,
-    order_id,
-    total_amount,
-    installment_number,
-  });
+    console.log("Parsed payment details:", {
+      payment_amount,
+      payment_method,
+      payment_type,
+      order_id,
+      total_amount,
+      installment_number,
+    });
 
-  try {
-    // Validate required fields
-    if (
-      !payment_amount ||
-      !payment_method ||
-      !payment_type ||
-      !order_id ||
-      !installment_number
-    ) {
-      return res.status(400).json({ error: "Missing required fields." });
-    }
+    try {
+      // Validate required fields
+      if (
+        !payment_amount ||
+        !payment_method ||
+        !payment_type ||
+        !order_id ||
+        !installment_number
+      ) {
+        return res.status(400).json({ error: "Missing required fields." });
+      }
 
-    // Convert installment_number to string to match ENUM type
-    const installmentNumber = String(installment_number);
+      // Convert installment_number to string to match ENUM type
+      const installmentNumber = String(installment_number);
 
-    console.log("Installment number:", installmentNumber);
+      console.log("Installment number:", installmentNumber);
 
-    const paymentAmount = parseFloat(payment_amount);
-    const totalAmount = parseFloat(total_amount);
+      const paymentAmount = parseFloat(payment_amount);
+      const totalAmount = parseFloat(total_amount);
 
-    // Insert payment details
-    const sql = `
+      // Insert payment details
+      const sql = `
       INSERT INTO payment_tbl (
         payment_amount, payment_method, installment_number, payment_type, total_amount, order_id, bill
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
-    // Save the file path to the database if a file was uploaded
-    const billFilePath = req.file ? req.file.path : null;
+      // Save the file path to the database if a file was uploaded
+      const billFilePath = req.file ? req.file.path : null;
 
-    await pool.promise().query(sql, [
-      paymentAmount,
-      payment_method,
-      installmentNumber, // Use the string value
-      payment_type,
-      totalAmount,
-      order_id,
-      billFilePath,
-    ]);
+      await pool.promise().query(sql, [
+        paymentAmount,
+        payment_method,
+        installmentNumber, // Use the string value
+        payment_type,
+        totalAmount,
+        order_id,
+        billFilePath,
+      ]);
 
-    res.status(200).send("Payment created successfully.");
-  } catch (err) {
-    console.error("Error processing payment:", err);
-    res.status(500).send("Failed to process payment.");
+      res.status(200).send("Payment created successfully.");
+    } catch (err) {
+      console.error("Error processing payment:", err);
+      res.status(500).send("Failed to process payment.");
+    }
   }
-});
+);
 
 app.put(
   "/admin/payments/:paymentId",
