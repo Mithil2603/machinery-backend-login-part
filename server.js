@@ -188,95 +188,101 @@ app.post("/register", (req, res) => {
     });
   }
 
-  bcrypt.hash(req.body.user_password.toString(), salt, (err, hash) => {
+  // Check if the email already exists in the user_tbl
+  const checkEmailSql = "SELECT email FROM user_tbl WHERE email = ?";
+  pool.query(checkEmailSql, [req.body.email], (err, results) => {
     if (err) {
-      console.error("Hashing Error:", err);
-      return res.json({ Error: "Error while hashing password!" });
+      console.error("SQL Error during email check:", err);
+      return res
+        .status(500)
+        .json({ Error: "Database error during email check" });
     }
 
-    const token = jwt.sign({ email: req.body.email }, process.env.JWT_SECRET, {
-      expiresIn: "1d",
-    });
+    if (results.length > 0) {
+      return res.status(409).json({ message: "Email already exists." });
+    }
 
-    const sql =
-      "INSERT INTO temp_user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, user_type, email_verified, otp, otp_expiration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    const values = [
-      req.body.first_name,
-      req.body.last_name,
-      req.body.email,
-      req.body.phone_number,
-      req.body.company_name,
-      req.body.company_address,
-      req.body.address_city,
-      req.body.address_state,
-      req.body.address_country,
-      req.body.pincode,
-      req.body.GST_no,
-      hash,
-      "customer",
-      false,
-      null,
-      null,
-    ];
-
-    pool.query(sql, values, (err, result) => {
+    // Proceed with hashing the password and inserting into temp_user_tbl
+    bcrypt.hash(req.body.user_password.toString(), saltRounds, (err, hash) => {
       if (err) {
-        if (err.code === "ER_DUP_ENTRY") {
-          return res
-            .status(409)
-            .json({ status: "Error", message: "Email already Exists" });
-        }
-        console.error("SQL Error:", err);
-        return res.json({ Error: "Error inserting data in server" });
+        console.error("Hashing Error:", err);
+        return res.json({ Error: "Error while hashing password!" });
       }
 
-      // Generate OTP
-      const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
-      const otpExpiration = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
+      // Insert into temporary user table
+      const sql =
+        "INSERT INTO temp_user_tbl(first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, user_password, otp, otp_expiration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      const values = [
+        req.body.first_name,
+        req.body.last_name,
+        req.body.email,
+        req.body.phone_number,
+        req.body.company_name,
+        req.body.company_address,
+        req.body.address_city,
+        req.body.address_state,
+        req.body.address_country,
+        req.body.pincode,
+        req.body.GST_no,
+        hash,
+        null, // OTP will be generated and stored later
+        null, // OTP expiration will be set later
+      ];
 
-      // Update the user with OTP and expiration
-      const updateSql =
-        "UPDATE temp_user_tbl SET otp = ?, otp_expiration = ? WHERE email = ?";
-      const updateValues = [otp, otpExpiration, req.body.email];
-
-      pool.query(updateSql, updateValues, (err) => {
+      pool.query(sql, values, (err, result) => {
         if (err) {
-          console.error("SQL Error:", err);
-          return res.json({ Error: "Error updating OTP in server" });
+          console.error("SQL Error during insert into temp_user_tbl:", err);
+          return res.json({ Error: "Error inserting data in server" });
         }
 
-        // Send OTP email
-        const mailOptions = {
-          from: process.env.EMAIL_USER,
-          to: req.body.email,
-          subject: "Your OTP Code",
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #39749f; border-radius: 5px;">
-              <h2 style="color: #ffffff;">Welcome to Our Service!</h2>
-              <p style="color: #ffffff;">Thank you for registering. Please use the following One-Time Password (OTP) to complete your registration:</p>
-              <h1 style="font-size: 36px; color: #4CAF50; text-align: center; padding: 10px; border: 2px solid #4CAF50; border-radius: 5px; display: inline-block;">
-                ${otp}
-              </h1>
-              <p style="color: #ffffff;">This OTP is valid for <strong>10 minutes</strong>.</p>
-              <p style="color: #ffffff;">If you did not request this, please ignore this email.</p>
-              <footer style="margin-top: 20px; font-size: 12px; color: #ffffff;">
-                <p>Thank you for choosing us!</p>
-                <p>Best Regards,<br>Radhe Enterprise Pvt. Ptd.</p>
-              </footer>
-            </div>
-          `,
-        };
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+        const otpExpiration = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
 
-        transporter.sendMail(mailOptions, (err) => {
+        // Update the temporary user with OTP and expiration
+        const updateSql =
+          "UPDATE temp_user_tbl SET otp = ?, otp_expiration = ? WHERE email = ?";
+        const updateValues = [otp, otpExpiration, req.body.email];
+
+        pool.query(updateSql, updateValues, (err) => {
           if (err) {
-            console.error("Email Sending Error:", err);
-            return res.json({ Error: "Error sending OTP email" });
+            console.error("SQL Error during OTP update:", err);
+            return res.json({ Error: "Error updating OTP in server" });
           }
 
-          return res.json({
-            status: "Success",
-            message:
-              "Please check your email for the OTP.",
+          // Send OTP email
+          const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: req.body.email,
+            subject: "Your OTP Code",
+            html: `
+              <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4; border-radius: 5px;">
+                <h2 style="color: #333;">Welcome to Our Service!</h2>
+                <p style="color: #555;">Thank you for registering. Please use the following One-Time Password (OTP) to complete your registration:</p>
+                <h1 style="font-size: 36px; color: #4CAF50; text-align: center; padding: 10px; border: 2px solid #4CAF50; border-radius: 5px; display: inline-block;">
+                  ${otp}
+                </h1>
+                <p style="color: #555;">This OTP is valid for <strong>10 minutes</strong>.</p>
+                <p style="color: #555;">If you did not request this, please ignore this email.</p>
+                <footer style="margin-top: 20px; font-size: 12px; color: #777;">
+                  <p>Thank you for choosing us!</p>
+                  <p>Best Regards,<br>Your Company Name</p>
+                </footer>
+              </div>
+            `,
+          };
+
+          transporter.sendMail(mailOptions, (err) => {
+            if (err) {
+              console.error("Email Sending Error:", err);
+              return res.json({ Error: "Error sending OTP email" });
+            }
+
+            return res.json({
+              status: "Success",
+              message:
+                "User  registered successfully. Please check your email for the OTP.",
+            });
           });
         });
       });
@@ -296,6 +302,11 @@ app.post("/verify-otp", (req, res) => {
     "SELECT otp, otp_expiration, user_password FROM temp_user_tbl WHERE email = ?";
   pool.query(sql, [email], (err, results) => {
     if (err) {
+      if (err.code === "ER_DUP_ENTRY") {
+        return res
+          .status(409)
+          .json({ status: "Error", message: "Email already Exists" });
+      }
       console.error("SQL Error:", err);
       return res
         .status(500)
