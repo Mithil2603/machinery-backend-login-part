@@ -257,7 +257,7 @@ app.post("/register", (req, res) => {
             subject: "Your OTP Code",
             html: `
               <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4; border-radius: 5px;">
-                <h2 style="color: #333;">Welcome to Our Service!</h2>
+                <h2 style="color: #333;">Welcome to Radhe Enterprise Pvt. Ltd.!</h2>
                 <p style="color: #555;">Thank you for registering. Please use the following One-Time Password (OTP) to complete your registration:</p>
                 <h1 style="font-size: 36px; color: #4CAF50; text-align: center; padding: 10px; border: 2px solid #4CAF50; border-radius: 5px; display: inline-block;">
                   ${otp}
@@ -266,7 +266,7 @@ app.post("/register", (req, res) => {
                 <p style="color: #555;">If you did not request this, please ignore this email.</p>
                 <footer style="margin-top: 20px; font-size: 12px; color: #777;">
                   <p>Thank you for choosing us!</p>
-                  <p>Best Regards,<br>Your Company Name</p>
+                  <p>Best Regards,<br>Radhe Enterprise Pvt. Ltd.</p>
                 </footer>
               </div>
             `,
