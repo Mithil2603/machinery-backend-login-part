@@ -933,6 +933,32 @@ app.get("/admin/pending-orders", async (req, res) => {
   }
 });
 
+app.get("/admin/pending-services", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        s.service_id, 
+        s.order_id, 
+        s.user_id, 
+        s.payment_id, 
+        s.requested_date, 
+        s.service_type, 
+        s.service_notes, 
+        s.service_cost, 
+        s.service_status,
+        p.payment_status  -- Fetching payment_status from payment_tbl
+      FROM service_tbl s
+      LEFT JOIN payment_tbl p ON s.payment_id = p.payment_id
+      WHERE s.service_status = 'Pending'
+    `);
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching pending services:", error);
+    res.status(500).json({ error: "Failed to fetch pending services" });
+  }
+});
+
 app.get("/admin/revenue", async (req, res) => {
   try {
     const result = await query(
