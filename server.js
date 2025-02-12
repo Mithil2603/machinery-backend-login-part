@@ -1038,7 +1038,9 @@ app.delete("/users/:id", verifyUser, verifyAdmin, async (req, res) => {
                 "Cannot delete user. The user has related orders in the system.",
             });
           }
-          return res.status(500).json({ message: "An unexpected error occurred.", error });
+          return res
+            .status(500)
+            .json({ message: "An unexpected error occurred.", error });
         }
         res.status(200).json({ message: "User deleted successfully." });
       }
@@ -2009,6 +2011,188 @@ app.post(
     }
   }
 );
+
+// Routes for Reports
+app.get("/admin/reports/users", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT user_id, first_name, last_name, email, registration_date 
+      FROM user_tbl 
+      ORDER BY registration_date DESC 
+      LIMIT 15
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ error: "Failed to fetch users report" });
+  }
+});
+
+app.get("/admin/reports/orders", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT o.order_id, o.user_id, p.product_name, od.quantity, od.order_status, o.order_date 
+      FROM order_tbl o JOIN product_tbl p ON od.product_id = p.product_id JOIN order_details_tbl od ON o.order_id = od.order_id ORDER BY order_date DESC 
+      LIMIT 9
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching orders report:", error);
+    res.status(500).json({ error: "Failed to fetch orders report" });
+  }
+});
+
+app.get("/admin/reports/orders/pending", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
+             od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length 
+      FROM order_tbl o 
+      JOIN order_details_tbl od ON o.order_id = od.order_id 
+      JOIN product_tbl p ON od.product_id = p.product_id 
+      WHERE o.order_status = 'Pending' 
+      ORDER BY o.order_date DESC 
+      LIMIT 9
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching pending orders:", error);
+    res.status(500).json({ error: "Failed to fetch pending orders" });
+  }
+});
+
+app.get("/admin/reports/orders/completed", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
+             od.quantity, od.no_of_ends, od.creel_type, od.creel_pitch, od.bobin_length 
+      FROM order_tbl o 
+      JOIN order_details_tbl od ON o.order_id = od.order_id 
+      JOIN product_tbl p ON od.product_id = p.product_id 
+      WHERE o.order_status = 'Delivered'
+      ORDER BY order_date DESC 
+      LIMIT 15
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching completed orders:", error);
+    res.status(500).json({ error: "Failed to fetch completed orders" });
+  }
+});
+
+app.get("/admin/reports/revenue", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT DATE_FORMAT(payment_date, '%Y-%m') AS month, SUM(payment_amount) AS total_revenue 
+      FROM payment_tbl 
+      WHERE payment_status = 'Completed' 
+      GROUP BY month 
+      ORDER BY month DESC
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching revenue report:", error);
+    res.status(500).json({ error: "Failed to fetch revenue report" });
+  }
+});
+
+app.get("/admin/reports/payment-status", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT payment_status, COUNT(payment_id) AS total_payments 
+      FROM payment_tbl 
+      GROUP BY payment_status
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching payment status report:", error);
+    res.status(500).json({ error: "Failed to fetch payment report" });
+  }
+});
+
+app.get("/admin/reports/services-status", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT service_status, COUNT(service_id) AS total_services 
+      FROM service_tbl 
+      GROUP BY service_status
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching services status report:", error);
+    res.status(500).json({ error: "Failed to fetch services report" });
+  }
+});
+
+app.get("/admin/reports/top-products", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+        p.product_name, 
+        COUNT(od.order_id) AS total_orders 
+      FROM order_details_tbl od
+      JOIN product_tbl p ON od.product_id = p.product_id 
+      GROUP BY p.product_name 
+      ORDER BY total_orders DESC 
+      LIMIT 9;
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching top products report:", error);
+    res.status(500).json({ error: "Failed to fetch top products report" });
+  }
+});
+
+app.get("/admin/reports/feedback", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT rating, COUNT(feedback_id) AS total_feedback 
+      FROM feedback_tbl 
+      GROUP BY rating
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching feedback report:", error);
+    res.status(500).json({ error: "Failed to fetch feedback report" });
+  }
+});
+
+app.get("/admin/reports/recent-orders", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT 
+      o.order_id, 
+      o.user_id, 
+      p.product_name, 
+      od.quantity, 
+      o.order_status, 
+      o.order_date 
+      FROM order_tbl o
+      JOIN order_details_tbl od ON o.order_id = od.order_id 
+      JOIN product_tbl p ON od.product_id = p.product_id 
+      ORDER BY o.order_date DESC 
+      LIMIT 9;
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching recent orders report:", error);
+    res.status(500).json({ error: "Failed to fetch recent orders report" });
+  }
+});
+
+app.get("/admin/reports/service-requests", async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT service_type, COUNT(service_id) AS total_requests 
+      FROM service_tbl 
+      GROUP BY service_type
+    `);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching service requests report:", error);
+    res.status(500).json({ error: "Failed to fetch service requests report" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server Started at ${PORT}`);
