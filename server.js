@@ -1032,7 +1032,13 @@ app.delete("/users/:id", verifyUser, verifyAdmin, async (req, res) => {
       [id],
       (error, results) => {
         if (error) {
-          throw error;
+          if (error.code === "ER_ROW_IS_REFERENCED_2") {
+            return res.status(400).json({
+              message:
+                "Cannot delete user. The user has related orders in the system.",
+            });
+          }
+          return res.status(500).json({ message: "An unexpected error occurred.", error });
         }
         res.status(200).json({ message: "User deleted successfully." });
       }
