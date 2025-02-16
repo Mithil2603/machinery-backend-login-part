@@ -1401,7 +1401,6 @@ app.put(
               if (error) {
                 throw error;
               }
-              console.log(`Product ${id} soft deleted successfully.`); // Log the soft delete
               res
                 .status(200)
                 .json({ message: "Product soft deleted successfully." });
@@ -1553,9 +1552,7 @@ app.post(
   verifyUser,
   verifyAdmin,
   upload.single("billFile"),
-  async (req, res) => {
-    console.log("Request body:", req.body); // Check if all fields are coming through correctly
-
+  async (req, res) => { 
     const {
       payment_amount,
       payment_method,
@@ -1564,15 +1561,6 @@ app.post(
       total_amount,
       installment_number,
     } = req.body; // Destructure payment details
-
-    console.log("Parsed payment details:", {
-      payment_amount,
-      payment_method,
-      payment_type,
-      order_id,
-      total_amount,
-      installment_number,
-    });
 
     try {
       // Validate required fields
@@ -1588,8 +1576,6 @@ app.post(
 
       // Convert installment_number to string to match ENUM type
       const installmentNumber = String(installment_number);
-
-      console.log("Installment number:", installmentNumber);
 
       const paymentAmount = parseFloat(payment_amount);
       const totalAmount = parseFloat(total_amount);
