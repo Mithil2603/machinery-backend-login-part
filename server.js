@@ -2189,27 +2189,138 @@ app.get("/admin/reports/:type", async (req, res) => {
       return res.status(400).json({ error: "Missing startDate or endDate" });
     }
 
-    const formattedStartDate = new Date(startDate).toISOString().split("T")[0];
-    const formattedEndDate = new Date(endDate).toISOString().split("T")[0];
+    const formattedStartDate = new Date(startDate);
+    const formattedEndDate = new Date(endDate);
+
+    // Set end date to end of day
+    formattedEndDate.setHours(23, 59, 59, 999);
 
     let query = "";
-    if (type === "orders") {
-      query = `SELECT * FROM order_tbl WHERE order_date BETWEEN ? AND ?`;
-    } else if (type === "users") {
-      query = `SELECT user_id, first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, email_verified, registration_date FROM user_tbl WHERE registration_date BETWEEN ? AND ?`;
-    } else if (type === "payments") {
-      query = `SELECT payment_id, order_id, payment_amount, payment_date, payment_method, payment_status, installment_number, payment_type, created_at FROM payment_tbl WHERE payment_date BETWEEN ? AND ?`;
-    } else if (type === "services") {
-      query = `SELECT * FROM service_tbl WHERE requested_date BETWEEN ? AND ?`;
-    } else {
-      return res.status(400).json({ error: "Invalid report type" });
+    let params = [formattedStartDate, formattedEndDate];
+
+    switch (type) {
+      case "complete":
+        query = `
+        SELECT 
+          o.order_id,
+          u.user_id,
+          u.company_name AS customer,
+          u.email,
+          u.phone_number,
+          o.order_date,
+          o.order_status,
+          GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
+          JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'quantity', od.quantity,
+              'creel_type', od.creel_type,
+              'bobin_length', od.bobin_length
+            )
+          ) AS order_details,
+          SUM(py.payment_amount) AS total_paid,
+          MAX(py.payment_status) AS payment_status,
+          MAX(d.delivery_status) AS delivery_status,
+          MAX(d.delivery_date) AS delivery_date,
+          GROUP_CONCAT(DISTINCT s.service_type) AS services,
+          MAX(s.service_status) AS service_status,
+          MAX(f.comment) AS latest_feedback,
+          MAX(f.rating) AS latest_rating
+        FROM order_tbl o
+        JOIN user_tbl u ON o.user_id = u.user_id
+        LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
+        LEFT JOIN product_tbl p ON od.product_id = p.product_id
+        LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+        LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+        LEFT JOIN service_tbl s ON o.order_id = s.order_id
+        LEFT JOIN feedback_tbl f ON (s.service_id = f.service_id OR p.product_id = f.product_id)
+        WHERE o.order_date BETWEEN ? AND ?
+        GROUP BY o.order_id, u.user_id
+        ORDER BY o.order_date DESC`;
+        break;
+      case "orders":
+        query = `
+        SELECT 
+        o.order_id,
+        u.first_name AS customer,
+        o.order_date,
+        o.order_status,
+        GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
+        SUM(od.quantity) AS total_quantity,
+        SUM(py.payment_amount) AS payment_amount,
+        GROUP_CONCAT(DISTINCT py.payment_status ORDER BY py.payment_date DESC) AS payment_statuses,
+        MAX(d.delivery_status) AS delivery_status,
+        MAX(d.delivery_date) AS delivery_date,
+        GROUP_CONCAT(DISTINCT s.service_type) AS service_types,
+        MAX(s.service_status) AS service_status
+      FROM order_tbl o
+      JOIN user_tbl u ON o.user_id = u.user_id
+      LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
+      LEFT JOIN product_tbl p ON od.product_id = p.product_id
+      LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+      LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+      LEFT JOIN service_tbl s ON o.order_id = s.order_id
+      WHERE o.order_date BETWEEN ? AND ?
+      GROUP BY o.order_id, u.company_name, o.order_date, o.order_status`;
+        break;
+      case "users":
+        query = `
+          SELECT 
+            u.user_id, u.first_name, u.last_name, u.email, u.phone_number, u.company_name, u.company_address, u.address_city, u.address_state, u.address_country, u.pincode, u.GST_no, u.email_verified, u.registration_date,
+            COUNT(o.order_id) AS total_orders,
+            SUM(py.payment_amount) AS total_spent,
+            MAX(o.order_date) AS last_order_date
+          FROM user_tbl u
+          LEFT JOIN order_tbl o ON u.user_id = o.user_id
+          LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+          WHERE u.registration_date BETWEEN ? AND ?
+          GROUP BY u.user_id`;
+        break;
+
+      case "payments":
+        query = `
+          SELECT 
+            py.payment_id, py.order_id, py.payment_amount, py.payment_date, py.payment_status, py.payment_method, py.payment_status, py.installment_number, py.payment_type, py.created_at,
+            u.company_name,
+            o.order_status,
+            d.delivery_status
+          FROM payment_tbl py
+          JOIN order_tbl o ON py.order_id = o.order_id
+          JOIN user_tbl u ON o.user_id = u.user_id
+          LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+          WHERE py.payment_date BETWEEN ? AND ?`;
+        break;
+
+      case "services":
+        query = `
+          SELECT 
+            s.*,
+            u.company_name,
+            o.order_date,
+            py.payment_status,
+            d.delivery_status
+          FROM service_tbl s
+          JOIN user_tbl u ON s.user_id = u.user_id
+          JOIN order_tbl o ON s.order_id = o.order_id
+          LEFT JOIN payment_tbl py ON s.payment_id = py.payment_id
+          LEFT JOIN delivery_tbl d ON s.order_id = d.order_id
+          WHERE s.requested_date BETWEEN ? AND ?`;
+        break;
+
+      default:
+        return res.status(400).json({ error: "Invalid report type" });
     }
 
-    const [rows] = await pool
-      .promise()
-      .query(query, [formattedStartDate, formattedEndDate]);
+    const [rows] = await pool.promise().query(query, params);
 
-    res.json(rows); // Send only the data, not metadata
+    // Add report metadata
+    const reportData = {
+      generated_at: new Date(),
+      date_range: { start: formattedStartDate, end: formattedEndDate },
+      type,
+      data: rows,
+    };
+
+    res.json(reportData);
   } catch (error) {
     console.error("Database error:", error);
     res.status(500).json({ error: "Database error", details: error.message });
