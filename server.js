@@ -1552,7 +1552,7 @@ app.post(
   verifyUser,
   verifyAdmin,
   upload.single("billFile"),
-  async (req, res) => { 
+  async (req, res) => {
     const {
       payment_amount,
       payment_method,
@@ -1999,7 +1999,7 @@ app.post(
 );
 
 // Routes for Reports
-app.get("/admin/reports/users", async (req, res) => {
+app.get("/admin/static_reports/users", async (req, res) => {
   try {
     const result = await query(`
       SELECT user_id, first_name, last_name, email, registration_date 
@@ -2014,10 +2014,10 @@ app.get("/admin/reports/users", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/orders", async (req, res) => {
+app.get("/admin/static_reports/orders", async (req, res) => {
   try {
     const result = await query(`
-      SELECT o.order_id, o.user_id, p.product_name, od.quantity, od.order_status, o.order_date 
+      SELECT o.order_id, o.user_id, p.product_name, od.quantity, o.order_status, o.order_date 
       FROM order_tbl o JOIN product_tbl p ON od.product_id = p.product_id JOIN order_details_tbl od ON o.order_id = od.order_id ORDER BY order_date DESC 
       LIMIT 9
     `);
@@ -2028,7 +2028,7 @@ app.get("/admin/reports/orders", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/orders/pending", async (req, res) => {
+app.get("/admin/static_reports/orders/pending", async (req, res) => {
   try {
     const result = await query(`
       SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
@@ -2047,7 +2047,7 @@ app.get("/admin/reports/orders/pending", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/orders/completed", async (req, res) => {
+app.get("/admin/static_reports/orders/completed", async (req, res) => {
   try {
     const result = await query(`
       SELECT o.order_id, o.order_status, o.order_date, od.product_id, p.product_name, 
@@ -2066,7 +2066,7 @@ app.get("/admin/reports/orders/completed", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/revenue", async (req, res) => {
+app.get("/admin/static_reports/revenue", async (req, res) => {
   try {
     const result = await query(`
       SELECT DATE_FORMAT(payment_date, '%Y-%m') AS month, SUM(payment_amount) AS total_revenue 
@@ -2082,7 +2082,7 @@ app.get("/admin/reports/revenue", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/payment-status", async (req, res) => {
+app.get("/admin/static_reports/payment-status", async (req, res) => {
   try {
     const result = await query(`
       SELECT payment_status, COUNT(payment_id) AS total_payments 
@@ -2096,7 +2096,7 @@ app.get("/admin/reports/payment-status", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/services-status", async (req, res) => {
+app.get("/admin/static_reports/services-status", async (req, res) => {
   try {
     const result = await query(`
       SELECT service_status, COUNT(service_id) AS total_services 
@@ -2110,7 +2110,7 @@ app.get("/admin/reports/services-status", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/top-products", async (req, res) => {
+app.get("/admin/static_reports/top-products", async (req, res) => {
   try {
     const result = await query(`
       SELECT 
@@ -2129,7 +2129,7 @@ app.get("/admin/reports/top-products", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/feedback", async (req, res) => {
+app.get("/admin/static_reports/feedback", async (req, res) => {
   try {
     const result = await query(`
       SELECT rating, COUNT(feedback_id) AS total_feedback 
@@ -2143,7 +2143,7 @@ app.get("/admin/reports/feedback", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/recent-orders", async (req, res) => {
+app.get("/admin/static_reports/recent-orders", async (req, res) => {
   try {
     const result = await query(`
       SELECT 
@@ -2166,7 +2166,7 @@ app.get("/admin/reports/recent-orders", async (req, res) => {
   }
 });
 
-app.get("/admin/reports/service-requests", async (req, res) => {
+app.get("/admin/static_reports/service-requests", async (req, res) => {
   try {
     const result = await query(`
       SELECT service_type, COUNT(service_id) AS total_requests 
@@ -2177,6 +2177,42 @@ app.get("/admin/reports/service-requests", async (req, res) => {
   } catch (error) {
     console.error("Error fetching service requests report:", error);
     res.status(500).json({ error: "Failed to fetch service requests report" });
+  }
+});
+
+app.get("/admin/reports/:type", async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "Missing startDate or endDate" });
+    }
+
+    const formattedStartDate = new Date(startDate).toISOString().split("T")[0];
+    const formattedEndDate = new Date(endDate).toISOString().split("T")[0];
+
+    let query = "";
+    if (type === "orders") {
+      query = `SELECT * FROM order_tbl WHERE order_date BETWEEN ? AND ?`;
+    } else if (type === "users") {
+      query = `SELECT user_id, first_name, last_name, email, phone_number, company_name, company_address, address_city, address_state, address_country, pincode, GST_no, email_verified, registration_date FROM user_tbl WHERE registration_date BETWEEN ? AND ?`;
+    } else if (type === "payments") {
+      query = `SELECT payment_id, order_id, payment_amount, payment_date, payment_method, payment_status, installment_number, payment_type, created_at FROM payment_tbl WHERE payment_date BETWEEN ? AND ?`;
+    } else if (type === "services") {
+      query = `SELECT * FROM service_tbl WHERE requested_date BETWEEN ? AND ?`;
+    } else {
+      return res.status(400).json({ error: "Invalid report type" });
+    }
+
+    const [rows] = await pool
+      .promise()
+      .query(query, [formattedStartDate, formattedEndDate]);
+
+    res.json(rows); // Send only the data, not metadata
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Database error", details: error.message });
   }
 });
 
