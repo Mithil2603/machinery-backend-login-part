@@ -2183,7 +2183,7 @@ app.get("/admin/static_reports/service-requests", async (req, res) => {
 app.get("/admin/reports/:type", async (req, res) => {
   try {
     const { type } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, status } = req.query;
 
     if (!startDate || !endDate) {
       return res.status(400).json({ error: "Missing startDate or endDate" });
@@ -2197,9 +2197,19 @@ app.get("/admin/reports/:type", async (req, res) => {
 
     let query = "";
     let params = [formattedStartDate, formattedEndDate];
+    let statusFilter;
 
     switch (type) {
       case "complete":
+        // Validate status if provided
+        if (status) {
+          const validStatuses = ["Confirmed", "Delivered", "Cancelled"];
+          if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: "Invalid status filter" });
+          }
+          statusFilter = status;
+        }
+
         query = `
         SELECT 
           o.order_id,
@@ -2234,8 +2244,10 @@ app.get("/admin/reports/:type", async (req, res) => {
         LEFT JOIN service_tbl s ON o.order_id = s.order_id
         LEFT JOIN feedback_tbl f ON (u.user_id = f.user_id)
         WHERE o.order_date BETWEEN ? AND ?
+        ${statusFilter ? "AND o.order_status = ?" : ""}
         GROUP BY o.order_id, u.user_id
         ORDER BY o.order_date DESC`;
+        if (statusFilter) params.push(statusFilter);
         break;
       case "orders":
         query = `
