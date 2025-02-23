@@ -2232,7 +2232,7 @@ app.get("/admin/reports/:type", async (req, res) => {
         LEFT JOIN payment_tbl py ON o.order_id = py.order_id
         LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
         LEFT JOIN service_tbl s ON o.order_id = s.order_id
-        LEFT JOIN feedback_tbl f ON (s.service_id = f.service_id OR p.product_id = f.product_id)
+        LEFT JOIN feedback_tbl f ON (u.user_id = f.user_id)
         WHERE o.order_date BETWEEN ? AND ?
         GROUP BY o.order_id, u.user_id
         ORDER BY o.order_date DESC`;
