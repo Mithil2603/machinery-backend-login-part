@@ -2203,7 +2203,12 @@ app.get("/admin/reports/:type", async (req, res) => {
       case "complete":
         // Validate status if provided
         if (status) {
-          const validStatuses = ["Pending", "Confirmed", "Delivered", "Cancelled"];
+          const validStatuses = [
+            "Pending",
+            "Confirmed",
+            "Delivered",
+            "Cancelled",
+          ];
           if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: "Invalid status filter" });
           }
@@ -2251,7 +2256,12 @@ app.get("/admin/reports/:type", async (req, res) => {
       case "orders":
         // Validate status if provided
         if (status) {
-          const validStatuses = ["Pending", "Confirmed", "Delivered", "Cancelled"];
+          const validStatuses = [
+            "Pending",
+            "Confirmed",
+            "Delivered",
+            "Cancelled",
+          ];
           if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: "Invalid status filter" });
           }
@@ -2286,17 +2296,33 @@ app.get("/admin/reports/:type", async (req, res) => {
         break;
 
       case "users":
-        query = `
-          SELECT 
-            u.first_name, u.last_name, u.email, u.phone_number, u.company_name, u.company_address, u.address_city, u.address_state, u.address_country, u.pincode, u.GST_no, u.registration_date,
-            COUNT(o.order_id) AS total_orders,
-            SUM(py.payment_amount) AS total_spent,
-            MAX(o.order_date) AS last_order_date
-          FROM user_tbl u
-          LEFT JOIN order_tbl o ON u.user_id = o.user_id
-          LEFT JOIN payment_tbl py ON o.order_id = py.order_id
-          WHERE u.registration_date BETWEEN ? AND ?
-          GROUP BY u.user_id`;
+        const { customerName } = req.query;
+
+        let userQuery = `
+            SELECT 
+              u.first_name, u.last_name, u.email, u.phone_number, 
+              u.company_name, u.company_address, u.address_city, 
+              u.address_state, u.address_country, u.pincode, 
+              u.GST_no, u.registration_date,
+              COUNT(o.order_id) AS total_orders,
+              COALESCE(SUM(py.payment_amount), 0) AS total_spent,
+              MAX(o.order_date) AS last_order_date
+            FROM user_tbl u
+            LEFT JOIN order_tbl o ON u.user_id = o.user_id
+            LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+            WHERE u.registration_date BETWEEN ? AND ?`;
+
+        if (customerName) {
+          userQuery += ` AND (
+              CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR 
+              u.company_name LIKE ?
+            )`;
+          params.push(`%${customerName}%`, `%${customerName}%`);
+        }
+
+        userQuery += " GROUP BY u.user_id ORDER BY u.registration_date DESC";
+
+        query = userQuery; // Use the dynamically built query
         break;
 
       case "payments":
