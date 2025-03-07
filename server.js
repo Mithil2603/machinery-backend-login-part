@@ -2211,10 +2211,8 @@ app.get("/admin/reports/:type", async (req, res) => {
         }
 
         query = `
-        SELECT 
-          o.order_id,
-          u.user_id,
-          u.company_name AS customer,
+        SELECT u.first_name, u.last_name, 
+          u.company_name AS company,
           u.email,
           u.phone_number,
           o.order_date,
@@ -2261,8 +2259,7 @@ app.get("/admin/reports/:type", async (req, res) => {
         }
 
         query = `
-          SELECT 
-            o.order_id,
+          SELECT
             u.first_name AS customer,
             o.order_date,
             o.order_status,
@@ -2291,7 +2288,7 @@ app.get("/admin/reports/:type", async (req, res) => {
       case "users":
         query = `
           SELECT 
-            u.user_id, u.first_name, u.last_name, u.email, u.phone_number, u.company_name, u.company_address, u.address_city, u.address_state, u.address_country, u.pincode, u.GST_no, u.email_verified, u.registration_date,
+            u.first_name, u.last_name, u.email, u.phone_number, u.company_name, u.company_address, u.address_city, u.address_state, u.address_country, u.pincode, u.GST_no, u.registration_date,
             COUNT(o.order_id) AS total_orders,
             SUM(py.payment_amount) AS total_spent,
             MAX(o.order_date) AS last_order_date
@@ -2305,10 +2302,7 @@ app.get("/admin/reports/:type", async (req, res) => {
       case "payments":
         query = `
           SELECT 
-            py.payment_id, py.order_id, py.payment_amount, py.payment_date, py.payment_status, py.payment_method, py.payment_status, py.installment_number, py.payment_type, py.created_at,
-            u.company_name,
-            o.order_status,
-            d.delivery_status
+            u.first_name, u.last_name, u.company_name, py.payment_amount, py.payment_date, py.payment_status, py.payment_method, py.payment_status, py.installment_number, py.payment_type, py.created_at, o.order_status, d.delivery_status
           FROM payment_tbl py
           JOIN order_tbl o ON py.order_id = o.order_id
           JOIN user_tbl u ON o.user_id = u.user_id
@@ -2319,8 +2313,8 @@ app.get("/admin/reports/:type", async (req, res) => {
       case "services":
         query = `
           SELECT 
-            s.*,
-            u.company_name,
+            s.service_type, s.service_notes, s.requested_date, s.completed_date, s.service_cost, s.service_status,
+            u.first_name, u.last_name, u.company_name,
             o.order_date,
             py.payment_status,
             d.delivery_status
