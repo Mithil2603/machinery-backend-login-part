@@ -2183,7 +2183,7 @@ app.get("/admin/static_reports/service-requests", async (req, res) => {
 app.get("/admin/reports/:type", async (req, res) => {
   try {
     const { type } = req.params;
-    const { startDate, endDate, status } = req.query;
+    const { startDate, endDate, status, customerName } = req.query;
 
     if (!startDate || !endDate) {
       return res.status(400).json({ error: "Missing startDate or endDate" });
@@ -2191,83 +2191,59 @@ app.get("/admin/reports/:type", async (req, res) => {
 
     const formattedStartDate = new Date(startDate);
     const formattedEndDate = new Date(endDate);
-
-    // Set end date to end of day
-    formattedEndDate.setHours(23, 59, 59, 999);
+    formattedEndDate.setHours(23, 59, 59, 999); // Set end date to end of day
 
     let query = "";
     let params = [formattedStartDate, formattedEndDate];
-    let statusFilter;
+
+    // Common status validation
+    const validStatuses = ["Pending", "Confirmed", "Delivered", "Cancelled"];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Invalid status filter" });
+    }
 
     switch (type) {
       case "complete":
-        // Validate status if provided
-        if (status) {
-          const validStatuses = [
-            "Pending",
-            "Confirmed",
-            "Delivered",
-            "Cancelled",
-          ];
-          if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: "Invalid status filter" });
-          }
-          statusFilter = status;
-        }
-
         query = `
-        SELECT u.first_name, u.last_name, 
-          u.company_name AS company,
-          u.email,
-          u.phone_number,
-          o.order_date,
-          o.order_status,
-          GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
-          JSON_ARRAYAGG(
-            JSON_OBJECT(
-              'quantity', od.quantity,
-              'creel_type', od.creel_type,
-              'bobin_length', od.bobin_length
-            )
-          ) AS order_details,
-          SUM(py.payment_amount) AS total_paid,
-          MAX(py.payment_status) AS payment_status,
-          MAX(d.delivery_status) AS delivery_status,
-          MAX(d.delivery_date) AS delivery_date,
-          GROUP_CONCAT(DISTINCT s.service_type) AS services,
-          MAX(s.service_status) AS service_status,
-          MAX(f.comment) AS latest_feedback,
-          MAX(f.rating) AS latest_rating
-        FROM order_tbl o
-        JOIN user_tbl u ON o.user_id = u.user_id
-        LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
-        LEFT JOIN product_tbl p ON od.product_id = p.product_id
-        LEFT JOIN payment_tbl py ON o.order_id = py.order_id
-        LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
-        LEFT JOIN service_tbl s ON o.order_id = s.order_id
-        LEFT JOIN feedback_tbl f ON (u.user_id = f.user_id)
-        WHERE o.order_date BETWEEN ? AND ?
-        ${statusFilter ? "AND o.order_status = ?" : ""}
-        GROUP BY o.order_id, u.user_id
-        ORDER BY o.order_date DESC`;
-        if (statusFilter) params.push(statusFilter);
+          SELECT u.first_name, u.last_name, 
+            u.company_name AS company,
+            u.email,
+            u.phone_number,
+            o.order_date,
+            o.order_status,
+            GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
+            JSON_ARRAYAGG(
+              JSON_OBJECT(
+                'quantity', od.quantity,
+                'creel_type', od.creel_type,
+                'bobin_length', od.bobin_length
+              )
+            ) AS order_details,
+            SUM(py.payment_amount) AS total_paid,
+            MAX(py.payment_status) AS payment_status,
+            MAX(d.delivery_status) AS delivery_status,
+            MAX(d.delivery_date) AS delivery_date,
+            GROUP_CONCAT(DISTINCT s.service_type) AS services,
+            MAX(s.service_status) AS service_status,
+            MAX(f.comment) AS latest_feedback,
+            MAX(f.rating) AS latest_rating
+          FROM order_tbl o
+          JOIN user_tbl u ON o.user_id = u.user_id
+          LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
+          LEFT JOIN product_tbl p ON od.product_id = p.product_id
+          LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+          LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+          LEFT JOIN service_tbl s ON o.order_id = s.order_id
+          LEFT JOIN feedback_tbl f ON u.user_id = f.user_id
+          WHERE o.order_date BETWEEN ? AND ?
+          ${status ? "AND o.order_status = ?" : ""}
+          GROUP BY o.order_id, u.user_id
+          ORDER BY o.order_date DESC`;
+
+        if (status) params.push(status);
         break;
 
       case "orders":
-        // Validate status if provided
-        if (status) {
-          const validStatuses = [
-            "Pending",
-            "Confirmed",
-            "Delivered",
-            "Cancelled",
-          ];
-          if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: "Invalid status filter" });
-          }
-          statusFilter = status;
-        }
-
         query = `
           SELECT
             u.first_name AS customer,
@@ -2289,40 +2265,47 @@ app.get("/admin/reports/:type", async (req, res) => {
           LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
           LEFT JOIN service_tbl s ON o.order_id = s.order_id
           WHERE o.order_date BETWEEN ? AND ?
-          ${statusFilter ? "AND o.order_status = ?" : ""}
+          ${status ? "AND o.order_status = ?" : ""}
           GROUP BY o.order_id, u.company_name, o.order_date, o.order_status`;
 
-        if (statusFilter) params.push(statusFilter);
+        if (status) params.push(status);
         break;
 
       case "users":
-        const { customerName } = req.query;
+        query = `
+          SELECT 
+            u.first_name, u.last_name, u.email, u.phone_number, 
+            u.company_name,  
+            u.GST_no, u.registration_date,
+            MAX(o.order_date) AS order_date,  
+            MAX(o.order_status) AS order_status,  
+            GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
+            SUM(od.quantity) AS total_quantity,
+            SUM(py.payment_amount) AS payment_amount,
+            GROUP_CONCAT(DISTINCT py.payment_status ORDER BY py.payment_date DESC) AS payment_statuses,
+            MAX(d.delivery_status) AS delivery_status,
+            MAX(d.delivery_date) AS delivery_date,
+            COUNT(o.order_id) AS total_orders,
+            COALESCE(SUM(py.payment_amount), 0) AS total_spent,
+            MAX(o.order_date) AS last_order_date
+          FROM user_tbl u
+          LEFT JOIN order_tbl o ON u.user_id = o.user_id
+          LEFT JOIN payment_tbl py ON o.order_id = py.order_id
+          LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
+          LEFT JOIN product_tbl p ON od.product_id = p.product_id
+          LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
+          WHERE u.registration_date BETWEEN ? AND ?
+          ${status ? "AND o.order_status = ?" : ""}
+          ${
+            customerName
+              ? "AND (CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR u.company_name LIKE ?)"
+              : ""
+          }
+          GROUP BY u.user_id
+          ORDER BY u.registration_date DESC`;
 
-        let userQuery = `
-            SELECT 
-              u.first_name, u.last_name, u.email, u.phone_number, 
-              u.company_name, u.company_address, u.address_city, 
-              u.address_state, u.address_country, u.pincode, 
-              u.GST_no, u.registration_date,
-              COUNT(o.order_id) AS total_orders,
-              COALESCE(SUM(py.payment_amount), 0) AS total_spent,
-              MAX(o.order_date) AS last_order_date
-            FROM user_tbl u
-            LEFT JOIN order_tbl o ON u.user_id = o.user_id
-            LEFT JOIN payment_tbl py ON o.order_id = py.order_id
-            WHERE u.registration_date BETWEEN ? AND ?`;
-
-        if (customerName) {
-          userQuery += ` AND (
-              CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR 
-              u.company_name LIKE ?
-            )`;
-          params.push(`%${customerName}%`, `%${customerName}%`);
-        }
-
-        userQuery += " GROUP BY u.user_id ORDER BY u.registration_date DESC";
-
-        query = userQuery; // Use the dynamically built query
+        if (status) params.push(status);
+        if (customerName) params.push(`%${customerName}%`, `%${customerName}%`);
         break;
 
       case "payments":
@@ -2356,17 +2339,16 @@ app.get("/admin/reports/:type", async (req, res) => {
         return res.status(400).json({ error: "Invalid report type" });
     }
 
+    // Execute query
     const [rows] = await pool.promise().query(query, params);
 
-    // Add report metadata
-    const reportData = {
+    // Return structured response
+    res.json({
       generated_at: new Date(),
       date_range: { start: formattedStartDate, end: formattedEndDate },
       type,
       data: rows,
-    };
-
-    res.json(reportData);
+    });
   } catch (error) {
     console.error("Database error:", error);
     res.status(500).json({ error: "Database error", details: error.message });
