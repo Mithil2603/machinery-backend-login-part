@@ -12,6 +12,7 @@ import multer from "multer";
 import crypto from "crypto";
 import Razorpay from "razorpay";
 import path from "path";
+import sendEmail from "./email.js";
 
 const salt = 10;
 const app = express();
@@ -463,11 +464,60 @@ app.get("/profile", verifyUser, (req, res) => {
   });
 });
 
+app.post("/verify-reset-otp", (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ Error: "Email and OTP are required." });
+  }
+
+  const sql =
+    "SELECT reset_token, reset_token_expires FROM user_tbl WHERE email = ?";
+  pool.query(sql, [email], (err, results) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res
+        .status(500)
+        .json({ Error: "Database error during OTP verification" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ Error: "User not found." });
+    }
+
+    const { reset_token: storedOtp, reset_token_expiry: otpExpiration } =
+      results[0];
+
+    if (storedOtp !== otp || new Date() >= new Date(otpExpiration)) {
+      return res.status(400).json({ Error: "Invalid or expired OTP." });
+    }
+
+    // Generate a secure reset token (e.g., using crypto)
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // Store the reset token in the database
+    const updateSql =
+      "UPDATE user_tbl SET reset_token = ?, reset_token_expires = ? WHERE email = ?";
+    pool.query(updateSql, [resetToken, resetTokenExpiry, email], (err) => {
+      if (err) {
+        console.error("SQL Error:", err);
+        return res.status(500).json({ Error: "Error updating reset token" });
+      }
+
+      res.json({
+        status: "Success",
+        message: "OTP verified successfully.",
+        resetToken,
+      });
+    });
+  });
+});
+
 // forget password method
 app.post("/forgot-password", (req, res) => {
   const { email } = req.body;
 
-  // Check if user exists
   const sql = "SELECT user_id FROM user_tbl WHERE email = ?";
   pool.query(sql, [email], (err, results) => {
     if (err) return res.status(500).json({ Error: "Database error!" });
@@ -475,61 +525,85 @@ app.post("/forgot-password", (req, res) => {
       return res.status(404).json({ Error: "User not found!" });
     }
 
-    // Generate token
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const expiryTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiration = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-    // Store token in database
+    // Store OTP and expiration in user_tbl
     const updateSql =
-      "UPDATE user_tbl SET reset_token = ?, reset_token_expiry = ? WHERE email = ?";
-    pool.query(updateSql, [resetToken, expiryTime, email], (err, result) => {
+      "UPDATE user_tbl SET reset_token = ?, reset_token_expires = ? WHERE email = ?";
+    pool.query(updateSql, [otp, otpExpiration, email], (err) => {
       if (err) return res.status(500).json({ Error: "Database update error!" });
 
-      // Send email with reset link
-      const resetLink = `http://${process.env.HOST_IP}/reset-password/${resetToken}`;
-      sendEmail(
-        email,
-        "Password Reset Request",
-        `Click here to reset your password: ${resetLink}`
-      );
+      // Email content
+      const subject = "Password Reset OTP - Radhe Enterprise Pvt. Ltd.";
+      const textContent = `Your OTP for password reset is: ${otp}. This OTP is valid for 10 minutes. If you did not request this, please ignore this email.`;
 
-      res.json({ status: "Success", message: "Password reset email sent!" });
+      const htmlContent = `
+        <div style="max-width: 600px; margin: auto; font-family: Arial, sans-serif; padding: 20px; background-color: #ffffff; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);">
+          <h2 style="color: #333; text-align: center;">Password Reset Request</h2>
+          <p style="color: #555; text-align: center;">Use the following OTP to reset your password:</p>
+          <div style="text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; color: #4CAF50; padding: 10px 20px; border: 2px solid #4CAF50; border-radius: 5px; display: inline-block;">
+              ${otp}
+            </span>
+          </div>
+          <p style="color: #555; text-align: center;">This OTP is valid for <strong>10 minutes</strong>.</p>
+          <p style="color: #555; text-align: center;">If you did not request this, please ignore this email.</p>
+          <hr style="margin-top: 20px;">
+          <footer style="text-align: center; font-size: 12px; color: #777;">
+            <p>Best Regards,</p>
+            <p><strong>Radhe Enterprise Pvt. Ltd.</strong></p>
+          </footer>
+        </div>
+      `;
+
+      // Send OTP via email
+      sendEmail(email, subject, textContent, htmlContent);
+
+      res.json({ status: "Success", message: "OTP sent to your email!" });
     });
   });
 });
 
 app.post("/reset-password", (req, res) => {
-  const { email, user_password } = req.body;
+  const { email, user_password, resetToken } = req.body;
 
-  // Check if the user exists
-  const sql = "SELECT * FROM user_tbl WHERE email = ?";
-  pool.query(sql, [email], (err, data) => {
-    if (err) {
-      return res.json({ Error: "Error accessing the server!" });
+  if (!email || !user_password || !resetToken) {
+    return res
+      .status(400)
+      .json({ Error: "Email, password, and reset token are required." });
+  }
+
+  const sql =
+    "SELECT reset_token, reset_token_expires FROM user_tbl WHERE email = ?";
+  pool.query(sql, [email], (err, results) => {
+    if (err) return res.status(500).json({ Error: "Database error!" });
+    if (results.length === 0)
+      return res.status(404).json({ Error: "User not found!" });
+
+    const { reset_token: storedToken, reset_token_expiry: tokenExpiry } =
+      results[0];
+
+    if (storedToken !== resetToken || new Date() >= new Date(tokenExpiry)) {
+      return res.status(400).json({ Error: "Invalid or expired reset token." });
     }
-    if (data.length > 0) {
-      // Hash the new password
-      bcrypt.hash(user_password, 10, (err, hash) => {
-        if (err) {
-          return res.json({ Error: "Error hashing password!" });
-        }
 
-        // Update the user's password
-        const updateSql =
-          "UPDATE user_tbl SET user_password = ? WHERE email = ?";
-        pool.query(updateSql, [hash, email], (err, result) => {
-          if (err) {
-            return res.json({ Error: "Error updating password!" });
-          }
-          return res.json({
-            status: "Success",
-            message: "Password reset successfully!",
-          });
+    bcrypt.hash(user_password, 10, (err, hash) => {
+      if (err)
+        return res.status(500).json({ Error: "Error hashing password!" });
+
+      const updateSql =
+        "UPDATE user_tbl SET user_password = ?, reset_token = NULL, reset_token_expires = NULL WHERE email = ?";
+      pool.query(updateSql, [hash, email], (err) => {
+        if (err)
+          return res.status(500).json({ Error: "Error updating password!" });
+        res.json({
+          status: "Success",
+          message: "Password reset successfully!",
         });
       });
-    } else {
-      return res.json({ message: "Email not found!" });
-    }
+    });
   });
 });
 
