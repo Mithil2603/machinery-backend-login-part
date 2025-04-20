@@ -2294,7 +2294,6 @@ app.get("/admin/reports/:type", async (req, res) => {
               )
             ) AS order_details,
             SUM(py.payment_amount) AS total_paid,
-            MAX(py.payment_status) AS payment_status,
             MAX(d.delivery_status) AS delivery_status,
             MAX(d.delivery_date) AS delivery_date,
             GROUP_CONCAT(DISTINCT s.service_type) AS services,
@@ -2325,19 +2324,13 @@ app.get("/admin/reports/:type", async (req, res) => {
             o.order_status,
             GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
             SUM(od.quantity) AS total_quantity,
-            SUM(py.payment_amount) AS payment_amount,
-            GROUP_CONCAT(DISTINCT py.payment_status ORDER BY py.payment_date DESC) AS payment_statuses,
-            MAX(d.delivery_status) AS delivery_status,
-            MAX(d.delivery_date) AS delivery_date,
-            GROUP_CONCAT(DISTINCT s.service_type) AS service_types,
-            MAX(s.service_status) AS service_status
+            SUM(py.payment_amount) AS payment_amount
           FROM order_tbl o
           JOIN user_tbl u ON o.user_id = u.user_id
           LEFT JOIN order_details_tbl od ON o.order_id = od.order_id
           LEFT JOIN product_tbl p ON od.product_id = p.product_id
           LEFT JOIN payment_tbl py ON o.order_id = py.order_id
           LEFT JOIN delivery_tbl d ON o.order_id = d.order_id
-          LEFT JOIN service_tbl s ON o.order_id = s.order_id
           WHERE o.order_date BETWEEN ? AND ?
           ${status ? "AND o.order_status = ?" : ""}
           GROUP BY o.order_id, u.company_name, o.order_date, o.order_status`;
@@ -2356,7 +2349,7 @@ app.get("/admin/reports/:type", async (req, res) => {
             GROUP_CONCAT(DISTINCT p.product_name SEPARATOR ', ') AS products,
             SUM(od.quantity) AS total_quantity,
             SUM(py.payment_amount) AS payment_amount,
-            GROUP_CONCAT(DISTINCT py.payment_status ORDER BY py.payment_date DESC) AS payment_statuses,
+            
             MAX(d.delivery_status) AS delivery_status,
             MAX(d.delivery_date) AS delivery_date,
             COUNT(o.order_id) AS total_orders,
@@ -2399,7 +2392,6 @@ app.get("/admin/reports/:type", async (req, res) => {
             s.service_type, s.service_notes, s.requested_date, s.completed_date, s.service_cost, s.service_status,
             u.first_name, u.last_name, u.company_name,
             o.order_date,
-            py.payment_status,
             d.delivery_status
           FROM service_tbl s
           JOIN user_tbl u ON s.user_id = u.user_id
